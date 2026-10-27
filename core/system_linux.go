@@ -182,7 +182,9 @@ func (s *SystemSetup) installUserTrust() error {
 	nssDir := filepath.Join(home, ".pki", "nssdb")
 	dbPath := filepath.Join(nssDir, "cert9.db")
 	if _, err := os.Stat(dbPath); err != nil {
-		if err := os.MkdirAll(filepath.Join(home, ".pki"), 0755); err != nil {
+		// 必须把 nssdb 这一层也建出来：certutil -N 只会在已存在的目录里建库，
+		// 目录缺失会报 SEC_ERROR_BAD_DATABASE（本机因为旧库已存在，掩盖过这个 bug）
+		if err := os.MkdirAll(nssDir, 0700); err != nil {
 			return err
 		}
 		out, err := exec.Command(certutil, "-N", "-d", "sql:"+nssDir, "--empty-password").CombinedOutput()
@@ -190,7 +192,7 @@ func (s *SystemSetup) installUserTrust() error {
 			return fmt.Errorf("create nss db failed: %s\n%s", err.Error(), out)
 		}
 	}
-	nickname := appOnce.AppName + "-root"
+	nickname := nssNickname
 	// 先删同名旧条目，避免重复导入报错
 	_ = exec.Command(certutil, "-D", "-d", "sql:"+nssDir, "-n", nickname).Run()
 	out, err := exec.Command(certutil, "-A", "-d", "sql:"+nssDir, "-t", "C,,", "-n", nickname, "-i", s.CertFile).CombinedOutput()
@@ -200,9 +202,50 @@ func (s *SystemSetup) installUserTrust() error {
 	return nil
 }
 
-func (s *SystemSetup) installCert() (string, error) {
-	_, err := s.initCert()
+// isCertTrusted 真正去信任链里比对指纹，而不是看 install.lock 在不在。
+// 返回命中的位置，便于日志和界面提示"到底装到哪了"。
+func (s *SystemSetup) isCertTrusted() (bool, string) {
+	fp, err := CAFingerprint()
 	if err != nil {
+		fmt.Println("[ca] 取指纹失败:", err.Error())
+		return false, ""
+	}
+	if hits := FindTrustedRoot(fp); len(hits) > 0 {
+		return true, strings.Join(hits, ", ")
+	}
+	if where, ok := FindInNSSDB(fp); ok {
+		return true, "NSS 用户库 " + where
+	}
+	return false, ""
+}
+
+// warnLegacySharedCA 老那把全世界共用、私钥公开的根如果还在信任库里，明确告警。
+// 只提示不自动删：删系统信任库要 root，而且这是用户自己的决定。
+func warnLegacySharedCA() {
+	var where []string
+	if hits := FindTrustedRoot(LegacySharedCAPrefix); len(hits) > 0 {
+		where = append(where, hits...)
+	}
+	if _, ok := FindInNSSDB(LegacySharedCAPrefix); ok {
+		home, _ := os.UserHomeDir()
+		where = append(where, filepath.Join(home, ".pki", "nssdb"))
+	}
+	if len(where) > 0 {
+		fmt.Println("[ca] 警告：系统里仍信任上游那把全球共用的根证书(CN=gowas.cn，私钥是公开的)，建议清理:", strings.Join(where, ", "))
+		fmt.Println("[ca] 清理办法见 build/kylin/migrate-off-shared-ca.sh")
+	}
+}
+
+// localCACertName 用户在界面点「安装证书」时投放的文件名。
+// 刻意与 deb 里的 res-downloader.crt 分开：同名会撞上 dpkg 的文件所有权，
+// 升级时被包覆盖、或卸载包时把用户自己装的证书一起带走。
+const (
+	localCACertName = "res-downloader-local.crt"
+	nssNickname     = "res-downloader-root"
+)
+
+func (s *SystemSetup) installCert() (string, error) {
+	if _, err := s.initCert(); err != nil {
 		return "", err
 	}
 
@@ -211,7 +254,7 @@ func (s *SystemSetup) installCert() (string, error) {
 		return "", fmt.Errorf("detect distro failed: %w", err)
 	}
 
-	certName := appOnce.AppName + ".crt"
+	certName := localCACertName
 	var certPath string
 	var updateCmd = []string{"update-ca-certificates"}
 

@@ -9,6 +9,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 	"log"
+	"os"
 	"res-downloader/core"
 	"runtime"
 
@@ -27,6 +28,24 @@ var icon []byte
 var wailsJson string
 
 func main() {
+	// 纯 CLI 入口：deb 的 postinst 以 root 调 `-init-ca <目录>` 生成本机专属根证书，
+	// 必须在任何 GUI/窗口初始化之前返回。
+	if len(os.Args) > 2 && os.Args[1] == "-init-ca" {
+		certPath, keyPath, err := core.GenerateCAAt(os.Args[2])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "init-ca failed:", err.Error())
+			os.Exit(1)
+		}
+		fmt.Println("generated:", certPath, keyPath)
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "-ca-status" {
+		// 只查询不弹窗：证书落在哪、系统信不信、有没有残留的旧共用根
+		core.GetApp(assets, wailsJson)
+		fmt.Print(core.CAStatus())
+		return
+	}
+
 	// Create an instance of the app structure
 	app := core.GetApp(assets, wailsJson)
 	bind := core.NewBind()
