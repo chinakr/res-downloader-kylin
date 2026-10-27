@@ -41,7 +41,8 @@ RUN=(docker run --rm
   -v "$SRC":/src
   -v resd-gomod:/go/pkg/mod
   -v resd-npmcache:/root/.npm
-  -w /src -e CGO_ENABLED=1 -e GOPROXY=https://goproxy.cn,direct
+  -w /src -e CGO_ENABLED=1 -e GOPROXY=https://goproxy.cn,direct \
+  -e GOMODCACHE=/go/pkg/mod
   "$IMAGE")
 
 # 构建中断也要把容器内 root 产生的文件归还给宿主机用户，否则麒麟上无法再次编辑

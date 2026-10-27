@@ -8,14 +8,15 @@ set -euo pipefail
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BIN="$SRC/bin/res-downloader-linux-arm64"
 PKG="res-downloader"
-VERSION="${VERSION:-$(sed -n 's/.*"productVersion": *"\([^"]*\)".*/\1/p' "$SRC/wails.json" | head -1)-kylin1}"
+VERSION="${VERSION:-$(sed -n 's/.*"productVersion": *"\([^"]*\)".*/\1/p' "$SRC/wails.json" | head -1)-kylin3}"
 ARCH="${ARCH:-$(dpkg --print-architecture 2>/dev/null || echo arm64)}"
 STAGE="$SRC/build/kylin/.stage"
 DIST="$SRC/dist"
 TEST=0; [ "${1:-}" = "--test-install" ] && TEST=1
-# RESD_WITH_CA=0 出一个不内置根证书的变体：装完不会往系统信任库加这把
-# 全世界共用、私钥公开在仓库里的 CA，需要抓 HTTPS 时再由用户在界面里点"安装证书"。
-WITH_CA="${RESD_WITH_CA:-1}"
+# 真实二进制放在 /usr/lib/res-downloader/ 下：GTK 的 WM_CLASS 取自可执行文件名，
+# 早先起名 res-downloader.app 会让 WM_CLASS 变成 "res-downloader.app"，
+# UKUI 面板按 WM_CLASS 关联 .desktop，对不上就认不出这是已安装应用的窗口。
+BIN_INSTALL_DIR=/usr/lib/res-downloader
 
 cleanup() { rm -rf "$STAGE"; }
 trap cleanup EXIT
@@ -26,36 +27,26 @@ command -v dpkg-deb >/dev/null || { echo "本机没有 dpkg-deb"; exit 1; }
 
 echo "[1/4] 组装 ${PKG} ${VERSION} (${ARCH}) 目录树"
 rm -rf "$STAGE"
-mkdir -p "$STAGE/DEBIAN" "$STAGE/usr/local/bin" "$STAGE/usr/share/applications" \
-         "$STAGE/usr/share/icons/hicolor/256x256/apps"
+mkdir -p "$STAGE/DEBIAN" "$STAGE$BIN_INSTALL_DIR" "$STAGE/usr/local/bin" \
+         "$STAGE/usr/share/applications" "$STAGE/usr/share/icons/hicolor/256x256/apps"
 
-install -m 755 "$BIN" "$STAGE/usr/local/bin/res-downloader.app"
+install -m 755 "$BIN" "$STAGE$BIN_INSTALL_DIR/res-downloader"
 install -m 644 "$SRC/build/appicon.png" "$STAGE/usr/share/icons/hicolor/256x256/apps/res-downloader.png"
 
-# 随包 CA 直接从 core/app.go 抽，不另存副本，避免和二进制里编译进去的那把对不上：
-# 上游把 MITM 根证书硬编码在源码里（公钥+私钥，全网共用同一把，CN=gowas.cn），
-# postinst 必须装的正是这一把，浏览器才会认。
-# 注意它作为包内文件直接落在 /usr/local/share/ca-certificates，purge 时由 dpkg 自己回收，
-# 不需要在 scriptlet 里手写删除逻辑。
-if [ "$WITH_CA" = 1 ]; then
-  # 包里不放任何证书内容：机器专属 CA 由 postinst 以 root 现场生成。
-  # 也不放符号链接——实测 Ubuntu/麒麟的 update-ca-certificates 对符号链接只在
-  # /etc/ssl/certs 下建 CApath 链接，不会并进合并 bundle，而 curl/Go/Node 读的是 bundle。
-  # 只放一个标记文件，让 postinst 知道这个变体要不要生成证书。
-  mkdir -p "$STAGE/usr/share/res-downloader"
-  echo "1" > "$STAGE/usr/share/res-downloader/with-ca"
-  echo "  标记为生成机器专属 CA 的变体（包内不含任何证书内容）"
-else
-  echo "  不预置 CA（RESD_WITH_CA=0）：app 首次运行在 ~/.config 自建"
-fi
+# 机器专属 CA 由 postinst 以 root 现场生成：包里不放任何证书内容，
+# 也不放符号链接（实测 update-ca-certificates 对符号链接只建 /etc/ssl/certs 下的
+# CApath 软链，不会并进 curl/Go/Node 实际读取的合并 bundle，必须真实文件）。
+echo "  证书不随包发布，由 postinst 生成这台机器专属的一把"
 
 # 启动包装：UKUI 是 Wayland 会话 + XWayland，WebKitGTK 2.38 的硬件合成路径
 # 会让 WebProcess 启动即崩（表现是窗口存在但纯白），必须固定这两个变量。
-cat > "$STAGE/usr/local/bin/res-downloader" <<'EOF'
+cat > "$STAGE/usr/local/bin/res-downloader" <<EOF
 #!/bin/sh
-export GDK_BACKEND="${GDK_BACKEND:-x11}"
-export WEBKIT_DISABLE_COMPOSITING_MODE="${WEBKIT_DISABLE_COMPOSITING_MODE:-1}"
-exec /usr/local/bin/res-downloader.app "$@"
+# 启动包装：除了补环境变量，也保证 WM_CLASS 是 res-downloader
+# （GTK 取可执行文件名当类名，真实程序在 $BIN_INSTALL_DIR/res-downloader）
+export GDK_BACKEND="\${GDK_BACKEND:-x11}"
+export WEBKIT_DISABLE_COMPOSITING_MODE="\${WEBKIT_DISABLE_COMPOSITING_MODE:-1}"
+exec $BIN_INSTALL_DIR/res-downloader "\$@"
 EOF
 chmod 755 "$STAGE/usr/local/bin/res-downloader"
 
@@ -68,10 +59,11 @@ Name[zh_CN]=资源下载器
 GenericName=Resource Downloader
 Comment=网络资源嗅探与高速下载（麒麟 V10 原生适配版）
 Exec=/usr/local/bin/res-downloader
-Icon=/usr/share/icons/hicolor/256x256/apps/res-downloader.png
+Icon=res-downloader
 Terminal=false
 Categories=Utility;FileTransfer;
 StartupNotify=false
+StartupWMClass=res-downloader
 EOF
 
 cat > "$STAGE/DEBIAN/control" <<EOF
@@ -101,12 +93,7 @@ CA_DIR=/etc/res-downloader
 CERT=$CA_DIR/ca.crt
 KEY=$CA_DIR/ca.key
 TRUST=/usr/local/share/ca-certificates/res-downloader.crt
-MARKER=/usr/share/res-downloader/with-ca
-
-# 不预置证书的变体：交给 app 首次运行在 ~/.config 自建
-if [ ! -f "$MARKER" ] && [ ! -f "$CERT" ]; then
-  exit 0
-fi
+APP=/usr/lib/res-downloader/res-downloader
 
 # 已存在就不重新生成：升级/重装保持同一把根，
 # 否则用户之前导进手机、别的设备的证书会一夜失效。
@@ -115,7 +102,7 @@ if [ ! -f "$CERT" ] || [ ! -f "$KEY" ]; then
   # 用 app 自带的 -init-ca 生成，而不是 openssl req -x509：
   # 发行版默认配置会把 basicConstraints 与 -addext 各写一遍，
   # 重复的 critical 扩展让证书链校验必然失败（实测踩过）。
-  if /usr/local/bin/res-downloader.app -init-ca "$CA_DIR" >/var/log/res-downloader-ca.log 2>&1; then
+  if "$APP" -init-ca "$CA_DIR" >/var/log/res-downloader-ca.log 2>&1; then
     chmod 755 "$CA_DIR"; chmod 644 "$CERT"; chmod 600 "$KEY"
     echo "已为本机生成专属根证书：$CERT"
   else
@@ -182,7 +169,7 @@ EOF
 chmod 755 "$STAGE/DEBIAN/postinst" "$STAGE/DEBIAN/postrm"
 
 echo "[2/4] 生成 md5sums"
-( cd "$STAGE" && find usr -type f ! -name res-downloader.app -exec md5sum {} \; > DEBIAN/md5sums )
+( cd "$STAGE" && find usr -type f -exec md5sum {} \; > DEBIAN/md5sums )
 
 echo "[3/4] dpkg-deb 打包"
 mkdir -p "$DIST"
@@ -202,45 +189,41 @@ if [ "$TEST" = 1 ]; then
     dpkg -i ./dist/'"$DEB_NAME"' 2>&1 | tail -3
     echo "--- 状态:"; dpkg -l res-downloader | tail -1
     echo "--- 可执行与桌面项:"
-    ls -1 /usr/local/bin/res-downloader /usr/local/bin/res-downloader.app /usr/share/applications/res-downloader.desktop
+    ls -1 /usr/local/bin/res-downloader /usr/lib/res-downloader/res-downloader /usr/share/applications/res-downloader.desktop
     sh -n /usr/local/bin/res-downloader && echo "  wrapper 语法 OK"
-    echo "--- 依赖完整性(not found 数，0 最好):"; ldd /usr/local/bin/res-downloader.app | grep -c "not found" || true
+    grep -q "StartupWMClass=res-downloader" /usr/share/applications/res-downloader.desktop \
+      && echo "  StartupWMClass 已对齐(可执行名 res-downloader → WM_CLASS 一致)" || echo "  警告：StartupWMClass 缺失"
+    echo "--- 依赖完整性(not found 数，0 最好):"; ldd /usr/lib/res-downloader/res-downloader | grep -c "not found" || true
     echo "--- md5sums 一致性:"
     ( cd / && md5sum -c --quiet /var/lib/dpkg/info/res-downloader.md5sums && echo "  全部一致" )
     echo "--- 机器专属 CA 是否已在安装时生成:"
-    if [ -f /etc/res-downloader/ca.crt ]; then
-      FP1=$(openssl x509 -in /etc/res-downloader/ca.crt -noout -fingerprint -sha256 | cut -d= -f2)
-      openssl x509 -in /etc/res-downloader/ca.crt -noout -subject -enddate
-      echo "--- 私钥权限(应 600):"; stat -c "  %a %U:%G %n" /etc/res-downloader/ca.crt /etc/res-downloader/ca.key
-      echo "--- 投放到信任目录的证书(应为真实文件,644):"; ls -l /usr/local/share/ca-certificates/res-downloader.crt
-      echo "--- 决定性检查：系统 bundle 是否信任这把新根"
-      openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt /etc/res-downloader/ca.crt
-      echo "--- 用它能签出可校验的叶子证书吗(等价于 MITM 中间人):"
-      # 拷到 /tmp 再签：-CAcreateserial 会在 CA 旁边写 ca.srl，别污染 /etc 目录
-      cp /etc/res-downloader/ca.crt /tmp/tca.crt; cp /etc/res-downloader/ca.key /tmp/tca.key
-      openssl req -new -newkey rsa:2048 -nodes -keyout /tmp/leaf.key -out /tmp/leaf.csr -subj "/CN=example.com" >/dev/null 2>&1
-      printf "basicConstraints=CA:FALSE\nsubjectAltName=DNS:example.com\n" >/tmp/leaf.ext
-      openssl x509 -req -in /tmp/leaf.csr -CA /tmp/tca.crt -CAkey /tmp/tca.key \
-        -CAcreateserial -days 30 -sha256 -extfile /tmp/leaf.ext -out /tmp/leaf.crt >/dev/null 2>&1
-      openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt /tmp/leaf.crt && echo "  叶子证书链校验通过"
-      echo "--- 升级幂等：重装一次，指纹不应变化(否则用户已导入的设备全部作废)"
-      dpkg -i ./dist/'"$DEB_NAME"' >/dev/null 2>&1
-      FP2=$(openssl x509 -in /etc/res-downloader/ca.crt -noout -fingerprint -sha256 | cut -d= -f2)
-      [ "$FP1" = "$FP2" ] && echo "  仍是同一把根，符合预期" || echo "  警告：CA 被重新生成了"
-      echo "--- purge 后证书与信任都应消失:"
-      dpkg --purge res-downloader >/dev/null 2>&1
-      ls /etc/res-downloader 2>&1 | tail -1
-      if openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt /tmp/leaf.crt >/dev/null 2>&1; then
-        echo "  警告：仍被系统信任"
-      else
-        echo "  已从系统信任库摘除"
-      fi
+    FP1=$(openssl x509 -in /etc/res-downloader/ca.crt -noout -fingerprint -sha256 | cut -d= -f2)
+    openssl x509 -in /etc/res-downloader/ca.crt -noout -subject -enddate
+    echo "--- 私钥权限(应 600):"; stat -c "  %a %U:%G %n" /etc/res-downloader/ca.crt /etc/res-downloader/ca.key
+    echo "--- 投放到信任目录的证书(应为真实文件,644):"; ls -l /usr/local/share/ca-certificates/res-downloader.crt
+    echo "--- 决定性检查：系统 bundle 是否信任这把新根"
+    openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt /etc/res-downloader/ca.crt
+    echo "--- 用它能签出可校验的叶子证书吗(等价于 MITM 中间人):"
+    cp /etc/res-downloader/ca.crt /tmp/tca.crt; cp /etc/res-downloader/ca.key /tmp/tca.key
+    openssl req -new -newkey rsa:2048 -nodes -keyout /tmp/leaf.key -out /tmp/leaf.csr -subj "/CN=example.com" >/dev/null 2>&1
+    printf "basicConstraints=CA:FALSE\nsubjectAltName=DNS:example.com\n" >/tmp/leaf.ext
+    openssl x509 -req -in /tmp/leaf.csr -CA /tmp/tca.crt -CAkey /tmp/tca.key \
+      -CAcreateserial -days 30 -sha256 -extfile /tmp/leaf.ext -out /tmp/leaf.crt >/dev/null 2>&1
+    openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt /tmp/leaf.crt && echo "  叶子证书链校验通过"
+    echo "--- 升级幂等：重装一次，指纹不应变化(否则用户已导入的设备全部作废)"
+    dpkg -i ./dist/'"$DEB_NAME"' >/dev/null 2>&1
+    FP2=$(openssl x509 -in /etc/res-downloader/ca.crt -noout -fingerprint -sha256 | cut -d= -f2)
+    [ "$FP1" = "$FP2" ] && echo "  仍是同一把根，符合预期" || echo "  警告：CA 被重新生成了"
+    echo "--- purge 后证书与信任都应消失:"
+    dpkg --purge res-downloader >/dev/null 2>&1
+    ls /etc/res-downloader 2>&1 | tail -1
+    if openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt /tmp/leaf.crt >/dev/null 2>&1; then
+      echo "  警告：仍被系统信任"
     else
-      echo "--- 本包不预置 CA（RESD_WITH_CA=0）：/etc/res-downloader 不该被创建"
-      test -e /etc/res-downloader && echo "  意外存在!" || echo "  未生成，符合预期"
-      dpkg --purge res-downloader >/dev/null 2>&1
+      echo "  已从系统信任库摘除"
     fi
-    echo "--- 卸载残留:"; dpkg -l res-downloader 2>/dev/null | tail -1; ls /usr/local/bin/ 2>/dev/null | grep res-downloader || echo "  /usr/local/bin 已干净"
+    echo "--- 卸载残留:"; dpkg -l res-downloader 2>/dev/null | tail -1
+    ls /usr/local/bin/ /usr/lib/res-downloader/ 2>/dev/null | grep res-downloader || echo "  安装路径已干净"
   '
 fi
 

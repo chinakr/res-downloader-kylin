@@ -9,7 +9,7 @@
 ## 安装
 
 ```
-sudo dpkg -i res-downloader_3.1.3-kylin2_arm64.deb
+sudo dpkg -i res-downloader_3.1.3-kylin3_arm64.deb
 ```
 
 装完做完了三件事：给这台机器生成一把专属根证书（`/etc/res-downloader/ca.crt`，私钥 600
@@ -30,7 +30,7 @@ sudo dpkg -i res-downloader_3.1.3-kylin2_arm64.deb
 ## 装完先验证这两条
 
 ```
-/usr/local/bin/res-downloader.app -ca-status
+/usr/lib/res-downloader/res-downloader -ca-status
 curl -s -o /dev/null -x http://127.0.0.1:8899 -w '%{http_code} %{ssl_verify_result}\n' https://example.com/
 ```
 
@@ -68,9 +68,10 @@ sudo dpkg --purge res-downloader
 会删掉本机根证书并把它从系统信任库里摘除。用户数据留在 `~/.config/res-downloader`
 （含 `ca.key` 私钥、缓存过的密码、日志），公用机器请务必自行清掉这个目录。
 
-## 该发哪个包
+## 任务栏上的图标
 
-| 包 | 用途 |
-| --- | --- |
-| `res-downloader_3.1.3-kylin2_arm64.deb` | 内网自用/发给同事：装完就能抓 HTTPS |
-| `res-downloader_3.1.3-kylin2-noca_arm64.deb` | 外发给不完全可控的对象：安装不动对方信任库，需要抓包时由本人点「安装证书」 |
+安装后任务栏应直接出现「资源下载器」的运行按钮，右键是它自己的窗口菜单。
+这里依赖一个约定：真实程序必须叫 `res-downloader` 并放在 `/usr/lib/res-downloader/` 下，
+桌面项里 `StartupWMClass=res-downloader` 与之一致——GTK 拿可执行文件名当 `WM_CLASS`，
+UKUI 面板靠它把窗口和已安装应用对应起来。自行改动安装路径时请让这两个名字保持一致，
+否则运行中的窗口不会被认出来，看起来就像"非得固定在任务栏上才有图标"。

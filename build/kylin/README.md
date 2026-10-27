@@ -47,7 +47,7 @@ gcc/链接器同代的 `crt1.o` 和 libc 做 CGO 链接，产物 glibc 门槛降
 | `core/shared/utils.go` | `OpenFolder` 的 linux 分支改成按 `PATH` 依次探测 `peony/peony-qt/nautilus/thunar/dolphin/pcmanfm/caja/xdg-open` | 上游只探测后四个，麒麟 UKUI 桌面只有 **peony**，界面上"打开目录/打开保存位置"必失败 |
 | `core/system_linux.go` | 接管桌面代理前把 `org.gnome.system.proxy` 的 mode 与 http/https host:port 备份到 `~/.config/res-downloader/gnome_proxy.backup.json`（0600），取消接管时还原；无备份时才退回原来的写死 `none` | 上游 `unsetProxy` 无条件把 mode 置 `none`，会永久抹掉用户原本配的公司代理 |
 | `core/system_linux.go` | 新增 `installUserTrust()`，把根证书装进用户级 NSS 库 `~/.pki/nssdb`；系统库需要 root 时，用户库成功即视为安装成功 | 麒麟上 `update-ca-certificates` 要 root，而 Chromium/Chrome、curl(NSS)、Node 都读用户级 NSS，免密即可完成 HTTPS 解密 |
-| `build/kylin/*` | 新增构建环境镜像、构建脚本、启动包装、免 root 安装脚本、打包与 e2e 脚本 | 见上 |
+| `build/kylin/*` | 新增构建环境镜像、构建脚本、启动包装、免 root 安装、打包与 e2e 脚本；deb 里可执行改放 `/usr/lib/res-downloader/res-downloader` 并给桌面项加 `StartupWMClass` | 可执行文件名会被 GTK 当作 `WM_CLASS`，原名 `res-downloader.app` 让 UKUI 面板认不出窗口（表现为任务栏要点固定才有图标） |
 | `core/certstore.go`（新增） | 机器专属 CA 的加载/生成、指纹比对式信任检测、`-init-ca`/`-ca-status` 支撑 | 见「CA 已改为每台机器一把」 |
 | `core/app.go` | 删掉硬编码的共用根证书与私钥；`isInstall()` 改为真检测；`lock()` 记录 scope+指纹 | 共用根的私钥是公开的；旧 `isInstall` 只看 lock 文件 |
 | `core/system.go` | `initCert()` 内容与当前 CA 不一致时重写；`pass.cache` 改用本机随机密钥 | 否则升级后会把上一世代的旧根再拷进信任库；固定 AES 密钥写在源码里等于明文缓存 |
@@ -73,16 +73,18 @@ gcc/链接器同代的 `crt1.o` 和 libc 做 CGO 链接，产物 glibc 门槛降
 ./build/kylin/package-deb.sh                  # → dist/res-downloader_<版本>_arm64.deb
 ./build/kylin/package-deb.sh --test-install   # 在 focal 容器里 dpkg -i / 重装 / purge 真跑一遍
 ./build/kylin/test-e2e-in-container.sh        # 装包 + Xvfb 起真界面 + 只靠系统信任链抓 HTTPS
-RESD_WITH_CA=0 VERSION=... package-deb.sh     # 不预置证书的保守变体
+VERSION=3.1.3-kylin3 ./build/kylin/package-deb.sh
 ```
 
 全程不需要 root：`dpkg-deb --build --root-owner-group` 把包内属主统一记成 root。
-包里是 `/usr/local/bin/res-downloader.app`（二进制）+ 同名启动包装（内置 WebKit 必需环境变量）
-+ UKUI 桌面项 + 图标 + 一个 `with-ca` 标记文件；**证书内容不在包里**。
+包里是 `/usr/lib/res-downloader/res-downloader`（二进制）+ `/usr/local/bin/res-downloader`
+启动包装（内置 WebKit 必需环境变量）+ UKUI 桌面项（带 `StartupWMClass=res-downloader`）+ 图标；
+**证书内容不在包里**。可执行文件名不能加 `.app` 之类的后缀：GTK 拿它当 `WM_CLASS`，
+UKUI 面板靠 `WM_CLASS` 与桌面项对应，对不上就认不出运行中的窗口（表现为"非得固定到任务栏"）。
 依赖 `libwebkit2gtk-4.0-37, libgtk-3-0`，Recommends `libnss3-tools`（NSS 兜底）、
 `gsettings-desktop-schemas`（接管桌面代理）。
 
-目标机安装：`sudo dpkg -i dist/res-downloader_3.1.3-kylin2_arm64.deb`。
+目标机安装：`sudo dpkg -i dist/res-downloader_3.1.3-kylin3_arm64.deb`。
 适用面：glibc ≥ 2.17 且带 webkit2gtk-4.0 的 deb 系 arm64（麒麟 V10/SP1、UOS、Ubuntu 18.04+）。
 只有 `webkit2gtk-4.1` 的系统（Debian 12+/Ubuntu 23.10+）需要换依赖与编译容器重做一版。
 
@@ -95,7 +97,7 @@ RESD_WITH_CA=0 VERSION=... package-deb.sh     # 不预置证书的保守变体
   → 都没有就在用户目录现生成（RSA-2048，`CA:TRUE`+`keyCertSign`，100 年，私钥 0600）。
   `appOnce.PublicCrt/PrivateKey` 由它注入，所以 `proxy.go` 的签发、`/api/cert` 的证书下载、
   界面安装流程全部自动跟随，不需要各自改。
-* `main.go` 增加两个不弹窗的 CLI 入口：`res-downloader.app -init-ca <目录>`（postinst 用）、
+* `main.go` 增加两个不弹窗的 CLI 入口：`res-downloader -init-ca <目录>`（postinst 用）、
   `-ca-status`（自查：证书在哪、系统信不信、有没有残留旧根）。
 * `postinst` 以 root 调 `-init-ca /etc/res-downloader` 生成并投放到
   `/usr/local/share/ca-certificates/res-downloader.crt`，再用 `update-ca-certificates --fresh`
@@ -106,7 +108,7 @@ RESD_WITH_CA=0 VERSION=... package-deb.sh     # 不预置证书的保守变体
 * `isInstall()` 不再只看 `install.lock`：改为拿当前证书指纹去系统 bundle、
   `/etc/ssl/certs/` 单文件、`~/.pki/nssdb` 里比对，真信了才算已安装。
   这条是本方案的硬要求——共用 CA 时代"文件在≈以前装过"侥幸成立，换成本机证书后它就是假信号。
-* 界面「安装证书」在拿不到 root 时仍会走用户级 NSS 兜底，所以 `RESD_WITH_CA=0` 变体也能抓 HTTPS，
+* 拿不到 root（不是安装用户、或没给密码）时，界面「安装证书」会退到用户级 NSS 兜底，
   只是需要用户点一次。
 * `~/.config/res-downloader/install.lock` 现在写入 `scope` 与证书指纹，便于排查装歪了的情况。
 * 顺带修掉：`pass.cache` 里 sudo 密码的加密密钥由「硬编码在源码里的全局固定值」
@@ -130,7 +132,7 @@ RESD_WITH_CA=0 VERSION=... package-deb.sh     # 不预置证书的保守变体
 
 `./build/kylin/migrate-off-shared-ca.sh`（体检，只读）／`--apply`（额外清掉用户 NSS 库里的旧根，免 root）。
 它会指出旧共用根在 bundle、投放目录、NSS 库里的具体位置，并把需要 root 的命令打印出来让你自己执行。
-在这台麒麟上，**装上 kylin2 版 deb 本身就是迁移**：postinst 会用本机 CA 覆盖同一个投放路径并 `--fresh` 重建。
+在这台麒麟上，**装上新版 deb 本身就是迁移**：postinst 会用本机 CA 覆盖同一个投放路径并 `--fresh` 重建。
 手机/其他设备上手工导入过旧证书的，要各自删一次，然后重启浏览器（NSS 会缓存信任链）。
 
 ## 已完成的验证
@@ -148,6 +150,7 @@ RESD_WITH_CA=0 VERSION=... package-deb.sh     # 不预置证书的保守变体
 | deb 卸载（容器内 dpkg --purge） | `/etc/res-downloader` 与投放文件清空，重建 bundle 后该 CA 不再被信任 |
 | 权限边界 | 私钥 `600 root:root` + ACL `user:<安装用户>:r--`；安装用户可读、同机其他用户读不到（容器内双用户实测） |
 | 容器内 e2e（`test-e2e-in-container.sh`） | 普通用户起真 GUI（Xvfb）→ 日志 `来源: 系统级 /etc/res-downloader` → 不指定 `--cacert` 纯靠系统信任链抓 example.com 与 baidu 均 `HTTP 200 ssl_verify=0` |
-| 无 root 路径（`RESD_WITH_CA=0` 变体） | app 在 `~/.config` 自建 CA（私钥 0600）→ 界面点安装走 NSS 兜底成功 → 重启进程后 `-ca-status` 仍识别为已信任 |
+| 无 root 时的兜底路径 | 用户级 CA 自建（私钥 0600）→ 界面点安装走 NSS 成功 → 重启进程后 `-ca-status` 仍识别为已信任 |
+| 任务栏关联 | 容器内实测窗口 `WM_CLASS="res-downloader"` 与桌面项 `StartupWMClass` 一致（改名前是 `res-downloader.app`，面板认不出） |
 | 旧共用根 | 二进制与源码里均已无该证书/私钥片段（`strings` 逐条比对为 0 命中） |
 | 包内二进制 | 与 `bin/res-downloader-linux-arm64` sha256 逐字节一致，`ldd` 无缺失 |

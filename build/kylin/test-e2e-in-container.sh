@@ -13,7 +13,7 @@ docker run --rm --shm-size=1g -v "$DEB":/tmp/rd.deb "$IMAGE" bash -c '
 set -e
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/dev/null 2>&1
-apt-get install -y -qq xvfb ca-certificates curl acl >/dev/null 2>&1
+apt-get install -y -qq xvfb ca-certificates curl acl x11-utils >/dev/null 2>&1
 echo "== 安装（以 SUDO_USER=appuser 模拟真实 sudo dpkg -i）"
 useradd -m appuser 2>/dev/null || true
 useradd -m nosy 2>/dev/null || true
@@ -47,13 +47,23 @@ grep -E "version:|\[ca\]|Service started" /tmp/app.log | sed "s/^/   /"
 echo "== 界面是否真渲染（WebProcess 存活）"
 pgrep -f WebKitWebProces >/dev/null && echo "   WebProcess 在跑" || { echo "   WebProcess 没起来"; tail -5 /tmp/app.log; }
 
+echo "== WM_CLASS 与桌面项 StartupWMClass 是否对得上（任务栏能否认出去向）"
+INST=$(DISPLAY=:99 xprop -name res-downloader WM_CLASS 2>/dev/null | cut -d, -f1 | cut -d= -f2 | tr -d " \"")
+echo "   窗口 WM_CLASS 实例名: ${INST:-取不到}"
+grep -o "StartupWMClass=.*" /usr/share/applications/res-downloader.desktop | sed "s|^|   桌面项: |"
+if [ "$INST" = "res-downloader" ]; then
+  echo "   匹配：UKUI 面板会把窗口认成已安装应用，不固定也会有任务栏按钮"
+else
+  echo "   不匹配：面板认不出这个窗口，表现就是必须手动固定"
+fi
+
 
 echo "== 关键一测：不指定 --cacert，纯靠系统信任链抓 HTTPS（等价于浏览器）"
 curl -s -o /dev/null -m 30 -x http://127.0.0.1:8899 -w "   example.com → HTTP %{http_code} ssl_verify=%{ssl_verify_result}\n" https://example.com/ || echo "   失败"
 curl -s -o /dev/null -m 30 -x http://127.0.0.1:8899 -w "   www.baidu.com → HTTP %{http_code} ssl_verify=%{ssl_verify_result}\n" https://www.baidu.com/ || echo "   失败"
 
 echo "== 证书状态诊断（-ca-status）"
-su appuser -c "export HOME=/home/appuser; /usr/local/bin/res-downloader.app -ca-status" 2>&1 | sed "s/^/   /"
+su appuser -c "export HOME=/home/appuser; /usr/lib/res-downloader/res-downloader -ca-status" 2>&1 | sed "s/^/   /"
 
 echo "== 界面「安装证书」应当直接报已安装（真检测，不是看 lock 文件）"
 curl -s -m 10 -X POST http://127.0.0.1:8899/api/install | sed "s/^/   /"; echo
