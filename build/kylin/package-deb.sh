@@ -8,7 +8,15 @@ set -euo pipefail
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BIN="$SRC/bin/res-downloader-linux-arm64"
 PKG="res-downloader"
-VERSION="${VERSION:-$(sed -n 's/.*"productVersion": *"\([^"]*\)".*/\1/p' "$SRC/wails.json" | head -1)-kylin3}"
+# deb 修订号默认 = 上游版本 + kylin3 + 构建标记（bin/.buildstamp，build.sh 写入），
+# 如 3.1.3-kylin3+build8-4d86a1b；显式传 VERSION 时完全覆盖。
+APP_VER="$(sed -n 's/.*"productVersion": *"\([^"]*\)".*/\1/p' "$SRC/wails.json" | head -1)"
+DEF_REV="${APP_VER}-kylin3"
+BUILD_STAMP_FILE="$SRC/bin/.buildstamp"
+if [ -f "$BUILD_STAMP_FILE" ]; then
+  DEF_REV="${DEF_REV}+$(head -c64 "$BUILD_STAMP_FILE" | tr -d '[:space:]')"
+fi
+VERSION="${VERSION:-$DEF_REV}"
 ARCH="${ARCH:-$(dpkg --print-architecture 2>/dev/null || echo arm64)}"
 STAGE="$SRC/build/kylin/.stage"
 DIST="$SRC/dist"

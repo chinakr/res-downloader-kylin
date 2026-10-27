@@ -82,6 +82,9 @@ func main() {
 
 			log.Println(logo)
 			fmt.Println("version:", app.Version)
+			if app.Build != "" {
+				fmt.Println("build:", app.Build)
+			}
 			fmt.Println("lockfile:", app.LockFile)
 			app.Startup(ctx)
 		},

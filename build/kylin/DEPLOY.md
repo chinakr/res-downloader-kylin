@@ -35,6 +35,17 @@ curl -s -o /dev/null -x http://127.0.0.1:8899 -w '%{http_code} %{ssl_verify_resu
 ```
 
 前者应输出 `已被系统信任: true` 并列出命中位置；后者应是 `200 0`。
+
+## 区分不同的构建
+
+产品版本号固定跟随上游（如 3.1.3），不加后缀；区分靠独立的构建标记，三处可见：
+
+* deb 文件名：`res-downloader_3.1.3-kylin3+build90-1a2b3c4_arm64.deb`
+* 程序里：左下角「关于」面板 `Version 3.1.3` 下一行，以及启动日志里的 `build:` 行
+* `res-downloader -ca-status` 的 `构建:` 字段
+
+标记格式是 `build<提交数>-<git 短哈希>`，工作区有未提交改动时追加 `-dirty`，
+由构建脚本自动生成，不需要手工维护。
 如果 `-ca-status` 打印了"上游共用根仍在信任链中"，说明这台机器装过老版本，
 用 `build/kylin/migrate-off-shared-ca.sh` 体检并按它打印的命令清理。
 

@@ -70,10 +70,17 @@ fi
 
 echo "[2/3] Go + CGO(webkit2gtk-4.0) 编译 linux/arm64"
 mkdir -p "$OUT"
-# -buildvcs=false：挂载进来的 .git 属主与容器内 root 不一致，git 会拒绝读仓库
+# -buildvcs=false：挂载进来的 .git 属主与容器内 root 不一致，git 会拒绝读仓库（用 safe.directory 绕开）。
+# 构建标记 = build<提交数>-<短哈希>[-dirty]，经 -ldflags -X 注入 core.BuildStamp：
+# 产品版本号 3.1.3 保持不动，用它区分同一版本下的不同构建；同时落盘 bin/.buildstamp
+# 供 package-deb.sh 拼 deb 修订号。
 "${RUN[@]}" bash -ec "
+  git config --global --add safe.directory '*' >/dev/null 2>&1 || true
+  STAMP=\"build\$(git rev-list --count HEAD 2>/dev/null || echo 0)-\$(git rev-parse --short HEAD 2>/dev/null || echo no-git)\"
+  git diff --quiet >/dev/null 2>&1 || STAMP=\"\$STAMP-dirty\"
+  echo \"\$STAMP\" | tee bin/.buildstamp
   go mod download
-  go build -trimpath -buildvcs=false -tags '$GO_TAGS' -ldflags '$GO_LDFLAGS' -o bin/res-downloader-linux-arm64 .
+  go build -trimpath -buildvcs=false -tags '$GO_TAGS' -ldflags \"$GO_LDFLAGS -X res-downloader/core.BuildStamp=\$STAMP\" -o bin/res-downloader-linux-arm64 .
 "
 
 BIN="$OUT/res-downloader-linux-arm64"

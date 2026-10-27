@@ -2,6 +2,7 @@ export namespace appType {
     interface App {
         AppName: string
         Version: string
+        Build: string
         Description: string
         Copyright: string
     }

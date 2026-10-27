@@ -15,6 +15,7 @@
               <div class="text-4xl font-bold">{{ store.appInfo.AppName }}</div>
               <div class="text-xs pl-5 text-slate-400">
                 Version {{ store.appInfo.Version }}
+                <span v-if="store.appInfo.Build" class="block">{{ store.appInfo.Build }}</span>
               </div>
             </div>
             <div class="text-slate-400 w-80 pt-2 pb-4">

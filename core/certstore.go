@@ -220,6 +220,9 @@ func CAStatus() string {
 	var b strings.Builder
 	fp, err := CAFingerprint()
 	fmt.Fprintf(&b, "来源: %s\n", CAScopeLabel())
+	if BuildStamp != "" {
+		fmt.Fprintf(&b, "构建: %s\n", BuildStamp)
+	}
 	if err != nil {
 		fmt.Fprintf(&b, "指纹: 取不到(%v)\n", err)
 		return b.String()

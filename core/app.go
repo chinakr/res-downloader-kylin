@@ -19,6 +19,7 @@ type App struct {
 	assets      embed.FS
 	AppName     string `json:"AppName"`
 	Version     string `json:"Version"`
+	Build       string `json:"Build"`
 	Description string `json:"Description"`
 	Copyright   string `json:"Copyright"`
 	UserDir     string `json:"-"`
@@ -40,6 +41,11 @@ var (
 	ruleOnce       *RuleSet
 )
 
+// BuildStamp 构建标记，由 build/kylin/build.sh 通过 -ldflags -X 注入，
+// 形如 build7-4d86a1b（提交数-短哈希，工作区有未提交改动时追加 -dirty）。
+// 产品版本号保持上游的 3.1.3 不动，用它区分同一版本下的不同构建。
+var BuildStamp string
+
 func GetApp(assets embed.FS, wjs string) *App {
 	if appOnce == nil {
 		matches := regexp.MustCompile(`"productVersion":\s*"([\d.]+)"`).FindStringSubmatch(wjs)
@@ -52,6 +58,7 @@ func GetApp(assets embed.FS, wjs string) *App {
 			assets:      assets,
 			AppName:     "res-downloader",
 			Version:     version,
+			Build:       BuildStamp,
 			Description: "res-downloader是一款集网络资源嗅探 + 高速下载功能于一体的软件，高颜值、高性能和多样化，提供个人用户下载自己上传到各大平台的网络资源功能！",
 			Copyright:   "Copyright © 2023~" + strconv.Itoa(time.Now().Year()),
 			IsReset:     false,

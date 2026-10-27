@@ -51,7 +51,7 @@ gcc/链接器同代的 `crt1.o` 和 libc 做 CGO 链接，产物 glibc 门槛降
 | `core/certstore.go`（新增） | 机器专属 CA 的加载/生成、指纹比对式信任检测、`-init-ca`/`-ca-status` 支撑 | 见「CA 已改为每台机器一把」 |
 | `core/app.go` | 删掉硬编码的共用根证书与私钥；`isInstall()` 改为真检测；`lock()` 记录 scope+指纹 | 共用根的私钥是公开的；旧 `isInstall` 只看 lock 文件 |
 | `core/system.go` | `initCert()` 内容与当前 CA 不一致时重写；`pass.cache` 改用本机随机密钥 | 否则升级后会把上一世代的旧根再拷进信任库；固定 AES 密钥写在源码里等于明文缓存 |
-| `main.go` | 两个不弹窗 CLI 入口 `-init-ca <目录>` / `-ca-status` | 让 postinst 与用户都能不依赖 GUI 检查证书状态 |
+| `main.go` / `core/app.go` | 两个不弹窗 CLI 入口 `-init-ca <目录>` / `-ca-status`；新增 `core.BuildStamp`（ldflags 注入）与 `App.Build` 字段，启动日志、/api/app-info、关于面板均显示 | 构建标记 = `build<提交数>-<短哈希>[-dirty]`，产品版本号保持上游 3.1.3 不动，用独立字段区分同一版本下的不同构建 |
 
 ## 运行期注意（原生跑相对 Docker 跑的差别）
 
