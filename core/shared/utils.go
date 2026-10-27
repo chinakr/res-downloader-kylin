@@ -142,19 +142,21 @@ func OpenFolder(filePath string) error {
 	case "windows":
 		cmd = exec.Command("explorer", "/select,", filePath)
 	case "linux":
-		cmd = exec.Command("nautilus", filePath)
-		if err := cmd.Start(); err != nil {
-			cmd = exec.Command("thunar", filePath)
-			if err := cmd.Start(); err != nil {
-				cmd = exec.Command("dolphin", filePath)
-				if err := cmd.Start(); err != nil {
-					cmd = exec.Command("pcmanfm", filePath)
-					if err := cmd.Start(); err != nil {
-						return err
-					}
-				}
+		// 麒麟 V10 (UKUI) 桌面自带的文件管理器是 peony，上游只探测
+		// nautilus/thunar/dolphin/pcmanfm，在这类机器上"打开目录"必然失败。
+		// 这里按 PATH 里真实存在的顺序逐个尝试，最后兜底 xdg-open。
+		candidates := []string{"peony", "peony-qt", "nautilus", "thunar", "dolphin", "pcmanfm", "caja", "xdg-open"}
+		var chosen string
+		for _, name := range candidates {
+			if _, lookErr := exec.LookPath(name); lookErr == nil {
+				chosen = name
+				break
 			}
 		}
+		if chosen == "" {
+			return errors.New("no file manager or xdg-open found on this system")
+		}
+		cmd = exec.Command(chosen, filePath)
 	default:
 		return errors.New("unsupported platform")
 	}
