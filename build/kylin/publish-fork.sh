@@ -4,6 +4,7 @@
 # 前置（必须你本人做）：在 https://github.com/putyy/res-downloader 页面点 Fork，
 # GitHub 会给你一份带完整历史的仓库；随后：
 #   ./build/kylin/publish-fork.sh https://github.com/你的用户名/res-downloader-kylin.git
+#   加 --check 只做预检不推送：  ... <仓库地址> [分支=master] --check
 #
 # 凭据建议：HTTPS 用 fine-grained Personal Access Token，权限只给这一个仓库的
 # Contents: Read and write；不要用带 admin/repo 全量权限的经典 token，
@@ -12,7 +13,10 @@ set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 URL="${1:-}"
-BRANCH="${2:-$(cd "$SRC" && git rev-parse --abbrev-ref HEAD)}"
+BRANCH="${2:-master}"
+CHECK_ONLY=0
+[ "${3:-}" = "--check" ] && CHECK_ONLY=1
+[ "$BRANCH" = "--check" ] && { BRANCH=master; CHECK_ONLY=1; }
 REMOTE=fork
 
 [ -n "$URL" ] || { echo "用法: $0 <fork 仓库地址> [分支=$BRANCH]"; exit 2; }
@@ -72,6 +76,31 @@ echo "  remote: $REMOTE → $URL"
 echo "  分支:   $BRANCH"
 git remote remove "$REMOTE" 2>/dev/null || true
 git remote add "$REMOTE" "$URL"
+
+# 只读探测：拿不到 fork 的分支就没法判断能不能快进；禁掉交互式凭据提示，
+# 免得在未登录环境下挂住。
+echo "== 4. 能否快进（fork 是从上游建的，上游若有新提交需要先变基）"
+if GIT_TERMINAL_PROMPT=0 git fetch -q "$REMOTE" "$BRANCH" 2>/dev/null; then
+  # 显式 fetch 单分支只更新 FETCH_HEAD，用它判断祖先关系最稳
+  if git merge-base --is-ancestor FETCH_HEAD HEAD; then
+    ok "fork 的 $BRANCH 是当前历史的祖先，可以直接快进推送"
+  else
+    echo "  fork/$BRANCH 上有我们没有的提交（上游在克隆之后又推进了）。先变基："
+    echo "    git fetch $REMOTE $BRANCH && git rebase FETCH_HEAD"
+    echo "  变基后重跑本脚本。"
+    exit 1
+  fi
+else
+  echo "  读不到 $REMOTE/$BRANCH（仓库还没建、地址不对，或需要凭据）。"
+  echo "  需要凭据时先设置好再跑，或直接在终端里 push。"
+fi
+
+if [ "$CHECK_ONLY" = 1 ]; then
+  echo
+  echo "预检通过（--check 模式，不推送）。准备好凭据后去掉 --check 即可推送。"
+  git remote remove "$REMOTE" 2>/dev/null || true
+  exit 0
+fi
 
 printf '\n确认推送？输入 yes 继续: '
 read -r ANSWER
