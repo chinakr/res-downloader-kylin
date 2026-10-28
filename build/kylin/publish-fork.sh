@@ -82,8 +82,17 @@ echo "  共 $(git rev-list --count upstream/master..HEAD) 个"
 echo "== 3. 目标"
 echo "  remote: $REMOTE → $URL"
 echo "  分支:   $BRANCH"
-git remote remove "$REMOTE" 2>/dev/null || true
-git remote add "$REMOTE" "$URL"
+# 只有本机自己加的 remote 才在收尾时清掉。之前无条件 remove，
+# 结果 --check 会把用户已经配好的 fork remote 一起删掉。
+ADDED_REMOTE=0
+EXISTING="$(git remote get-url "$REMOTE" 2>/dev/null || true)"
+if [ -z "$EXISTING" ]; then
+  git remote add "$REMOTE" "$URL"
+  ADDED_REMOTE=1
+elif [ "$EXISTING" != "$URL" ]; then
+  echo "  已有 $REMOTE remote（$EXISTING），按传入地址更新为 $URL"
+  git remote set-url "$REMOTE" "$URL"
+fi
 
 # 只读探测：拿不到 fork 的分支就没法判断能不能快进；禁掉交互式凭据提示，
 # 免得在未登录环境下挂住。
@@ -106,7 +115,10 @@ fi
 if [ "$CHECK_ONLY" = 1 ]; then
   echo
   echo "预检通过（--check 模式，不推送）。准备好凭据后去掉 --check 即可推送。"
-  git remote remove "$REMOTE" 2>/dev/null || true
+  if [ "$ADDED_REMOTE" = 1 ]; then
+    git remote remove "$REMOTE" 2>/dev/null || true
+    echo "  （临时添加的 $REMOTE remote 已清理）"
+  fi
   exit 0
 fi
 
