@@ -1,3 +1,9 @@
+> **⚠️ This is an unofficial fork of [putyy/res-downloader](https://github.com/putyy/res-downloader)**,
+> adapted to run natively on **Kylin V10 SP1 desktop (arm64)**, with security fixes
+> including a per-machine root certificate. The upstream author has not reviewed or
+> endorsed these changes. See **[FORK-NOTES.md](FORK-NOTES.md)** for the full change list
+> and licensing terms, and **[build/kylin/DEPLOY.md](build/kylin/DEPLOY.md)** for deployment.
+
 <div align="center">
 
 <a href="https://github.com/putyy/res-downloader"><img src="build/appicon.png" width="120"/></a>

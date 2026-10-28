@@ -1,3 +1,8 @@
+> **⚠️ 这是 [putyy/res-downloader](https://github.com/putyy/res-downloader) 的非官方适配分支**，
+> 面向**银河麒麟桌面 V10 SP1（arm64）**：原生运行改造 + 机器专属根证书等安全性修复。
+> 上游作者未审阅或背书本分支。改动清单、授权与商用限制见 **[FORK-NOTES.md](FORK-NOTES.md)**，
+> 目标机安装见 **[build/kylin/DEPLOY.md](build/kylin/DEPLOY.md)**。
+
 <div align="center">
 
 <a href="https://github.com/putyy/res-downloader"><img src="build/appicon.png" width="120"/></a>

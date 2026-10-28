@@ -6,5 +6,5 @@
 export GDK_BACKEND=${GDK_BACKEND:-x11}
 export DISPLAY=${DISPLAY:-:0}
 export WEBKIT_DISABLE_COMPOSITING_MODE=${WEBKIT_DISABLE_COMPOSITING_MODE:-1}
-BIN="${RES_DOWNLOADER_BIN:-/home/yewei/workspace/res-downloader/bin/res-downloader-linux-arm64}"
+BIN="${RES_DOWNLOADER_BIN:-"$(cd "$(dirname "$0")/../.." && pwd)/bin/res-downloader-linux-arm64"}"
 exec "$BIN" "$@"

@@ -16,6 +16,13 @@ BUILD_STAMP_FILE="$SRC/bin/.buildstamp"
 if [ -f "$BUILD_STAMP_FILE" ]; then
   DEF_REV="${DEF_REV}+$(head -c64 "$BUILD_STAMP_FILE" | tr -d '[:space:]')"
 fi
+# 打包者身份从本机 git 配置取，不写死任何个人信息：别人 clone 后打包就是他们自己的身份
+MAINTAINER="${MAINTAINER:-$(git config user.name 2>/dev/null)}"
+MAINTAINER_EMAIL="${MAINTAINER_EMAIL:-$(git config user.email 2>/dev/null)}"
+if [ -z "$MAINTAINER" ] || [ -z "$MAINTAINER_EMAIL" ]; then
+  MAINTAINER="res-downloader kylin port"
+  MAINTAINER_EMAIL="unknown@localhost"
+fi
 VERSION="${VERSION:-$DEF_REV}"
 ARCH="${ARCH:-$(dpkg --print-architecture 2>/dev/null || echo arm64)}"
 STAGE="$SRC/build/kylin/.stage"
@@ -82,7 +89,7 @@ Priority: optional
 Architecture: $ARCH
 Depends: libwebkit2gtk-4.0-37, libgtk-3-0
 Recommends: libnss3-tools, gsettings-desktop-schemas
-Maintainer: yewei <yewei@mj-yewei.local>
+Maintainer: $MAINTAINER <$MAINTAINER_EMAIL>
 Homepage: https://github.com/putyy/res-downloader
 Description: 网络资源嗅探与高速下载工具（银河麒麟 V10 SP1 原生适配版）
  res-downloader 是一款集网络资源嗅探与高速下载于一体的桌面工具。
