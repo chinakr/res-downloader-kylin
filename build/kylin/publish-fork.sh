@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# 把这个 fork 推到你在 GitHub 上 fork 出来的仓库。安全预检 + 显式确认，不代填凭据。
+#
+# 前置（必须你本人做）：在 https://github.com/putyy/res-downloader 页面点 Fork，
+# GitHub 会给你一份带完整历史的仓库；随后：
+#   ./build/kylin/publish-fork.sh https://github.com/你的用户名/res-downloader-kylin.git
+#
+# 凭据建议：HTTPS 用 fine-grained Personal Access Token，权限只给这一个仓库的
+# Contents: Read and write；不要用带 admin/repo 全量权限的经典 token，
+# 也不要把 token 写进 remote URL（那会明文留在 .git/config 里）。
+set -euo pipefail
+
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+URL="${1:-}"
+BRANCH="${2:-$(cd "$SRC" && git rev-parse --abbrev-ref HEAD)}"
+REMOTE=fork
+
+[ -n "$URL" ] || { echo "用法: $0 <fork 仓库地址> [分支=$BRANCH]"; exit 2; }
+cd "$SRC"
+command -v git >/dev/null || { echo "本机没有 git"; exit 1; }
+
+fail() { echo "✗ $*"; exit 1; }
+ok()  { echo "✓ $*"; }
+
+echo "== 1. 安全与隐私预检"
+[ -n "$(git status --porcelain)" ] && fail "工作区有未提交改动，先提交或还原"
+ok "工作区干净"
+
+if [ -e .git/shallow ]; then
+  echo "  提示：仓库仍是浅克隆，推上去会缺历史。先执行： git fetch --unshallow origin"
+  exit 1
+fi
+ok "历史完整（$(git rev-list --count HEAD) 个提交）"
+
+# 本机用户名/主机名绝不能出现在跟踪内容或提交元数据里
+if git grep -qI -E "mj-yewei|yewei@" -- . 2>/dev/null; then
+  git grep -nI -E "mj-yewei|yewei@" -- . | head -5
+  fail "跟踪文件里仍有本机标识，先清掉"
+fi
+if git log --all --format='%ae %ce' | grep -qE "mj-yewei"; then
+  fail "提交作者/提交者里仍有本机标识，需 filter-branch 改写"
+fi
+ok "无本机用户名/主机名残留"
+
+# 构建产物与凭据类文件不得入库
+if git ls-files | grep -qE '^(dist/|bin/)|\.(deb|key|pem|p12)$|\.npmrc|\.netrc|id_rsa'; then
+  git ls-files | grep -E '^(dist/|bin/)|\.(deb|key|pem|p12)$|\.npmrc|\.netrc|id_rsa' | head -5
+  fail "仓库里含构建产物或私钥类文件"
+fi
+ok "无构建产物/私钥入库（deb 请发 GitHub Releases，不要提交进仓库）"
+
+# fork 声明与许可必须存在，且 LICENSE 未被改动
+[ -f FORK-NOTES.md ] || fail "缺 FORK-NOTES.md（fork 说明与改动清单）"
+git diff --quiet origin/master -- LICENSE || fail "LICENSE 被改动过，Apache-2.0 要求原样保留"
+ok "FORK-NOTES.md 就位，LICENSE 未改动"
+
+case "$URL" in
+  *://*:*@*) fail "remote 地址里带凭据会被明文写进 .git/config，请去掉 user:token@" ;;
+esac
+
+echo "== 2. 将要推送的提交（相对上游）"
+git log --oneline --format='  %h %an %s' origin/master..HEAD
+echo "  共 $(git rev-list --count origin/master..HEAD) 个"
+
+echo "== 3. 目标"
+echo "  remote: $REMOTE → $URL"
+echo "  分支:   $BRANCH"
+git remote remove "$REMOTE" 2>/dev/null || true
+git remote add "$REMOTE" "$URL"
+
+printf '\n确认推送？输入 yes 继续: '
+read -r ANSWER
+[ "$ANSWER" = "yes" ] || { echo "已取消（remote $REMOTE 已配置，可稍后手动 git push）"; exit 1; }
+
+git push -u "$REMOTE" "$BRANCH"
+ok "已推送"
+
+cat <<'EOS'
+
+下一步建议：
+1. 到 fork 的 Settings → General 里勾选 "Create a fork of upstream" 之外的描述，
+   把 About 写清「非官方麒麟适配分支」，并保留上游链接。
+2. 若要发二进制：在 Releases 上传 dist/*.deb 并附校验值，说明它构建自哪个标记：
+     sha256sum dist/*.deb
+     构建标记见包名（build<提交数>-<短哈希>）
+   同时在 Release 说明里重复一次 MITM 根证书与「仅供学习研究、禁止商用」的提示。
+3. 凭据留在 credential helper 的缓存里即可，不要写进任何文件：
+     git config --global credential.helper 'cache --timeout=3600'
+EOS

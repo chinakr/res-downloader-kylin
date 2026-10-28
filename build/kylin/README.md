@@ -135,6 +135,24 @@ UKUI 面板靠 `WM_CLASS` 与桌面项对应，对不上就认不出运行中的
 在这台麒麟上，**装上新版 deb 本身就是迁移**：postinst 会用本机 CA 覆盖同一个投放路径并 `--fresh` 重建。
 手机/其他设备上手工导入过旧证书的，要各自删一次，然后重启浏览器（NSS 会缓存信任链）。
 
+## 发布到 GitHub（fork）
+
+本机 git 是免 root 装的：麒麟仓库的 `git 2.25.1` 解包在 `~/.local/opt/gitroot`，
+`~/.local/bin/git` 是个设置 `GIT_EXEC_PATH` 的包装器（Debian 的 git 二进制编译期写死了
+`/usr/lib/git-core`，不指过去就找不到 `git-remote-https` 等辅助程序）。没有本机 git 时
+`git.sh` 仍可用容器代跑。
+
+发布流程（细节与安全预检见 `publish-fork.sh` 顶部注释）：
+
+1. 先在 GitHub 上游页面点 **Fork**（GitHub 不能把已有仓库事后转成 fork，且 fork 自带完整历史）
+2. `git fetch --unshallow origin`（本仓库最初是浅克隆，不补全推上去会缺历史）
+3. `./build/kylin/publish-fork.sh https://github.com/<你的用户名>/<仓库名>.git`
+   —— 它会检查工作区干净、历史完整、跟踪文件与提交元数据里没有本机用户名/主机名、
+   没有把 `dist/`、`bin/`、私钥类文件入库、`LICENSE` 未被改动、`FORK-NOTES.md` 存在，
+   然后列出待推提交并要求显式确认
+4. 凭据用 fine-grained PAT（只给该仓库 Contents 写权限），**不要**写进 remote URL
+5. 二进制走 Releases 并附 `sha256sum`，不要提交进仓库
+
 ## 已完成的验证
 
 | 项目 | 结果 |
