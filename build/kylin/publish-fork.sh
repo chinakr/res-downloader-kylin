@@ -32,12 +32,17 @@ if [ -e .git/shallow ]; then
 fi
 ok "历史完整（$(git rev-list --count HEAD) 个提交）"
 
-# 本机用户名/主机名绝不能出现在跟踪内容或提交元数据里
-if git grep -qI -E "mj-yewei|yewei@" -- . 2>/dev/null; then
-  git grep -nI -E "mj-yewei|yewei@" -- . | head -5
-  fail "跟踪文件里仍有本机标识，先清掉"
+# 本机用户名/主机名绝不能出现在跟踪内容或提交元数据里。
+# 敏感字面量不写进脚本（否则脚本自己会被自己的扫描命中），改为运行时取本机身份。
+ME_USER="$(id -un)"
+ME_HOST="$(hostname 2>/dev/null || echo unknown)"
+PRIV_PATTERN="/home/${ME_USER}|${ME_USER}@|${ME_HOST}"
+
+echo "  扫描口径: 本机用户 ${ME_USER}、主机 ${ME_HOST}"
+if git grep -nI -E "$PRIV_PATTERN" -- . | head -5 | grep -q .; then
+  fail "跟踪文件里仍有本机标识（见上），先清掉"
 fi
-if git log --all --format='%ae %ce' | grep -qE "mj-yewei"; then
+if git log --all --format='%ae %ce' | grep -qE "${ME_USER}@|${ME_HOST}"; then
   fail "提交作者/提交者里仍有本机标识，需 filter-branch 改写"
 fi
 ok "无本机用户名/主机名残留"
