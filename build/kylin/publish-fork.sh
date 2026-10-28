@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# 把这个 fork 推到你在 GitHub 上 fork 出来的仓库。安全预检 + 显式确认，不代填凭据。
+# 把这个 fork 推到发布仓库（remote 名 fork）。安全预检 + 显式确认，不代填凭据。
 #
-# 前置（必须你本人做）：在 https://github.com/putyy/res-downloader 页面点 Fork，
-# GitHub 会给你一份带完整历史的仓库；随后：
-#   ./build/kylin/publish-fork.sh https://github.com/你的用户名/res-downloader-kylin.git
-#   加 --check 只做预检不推送：  ... <仓库地址> [分支=master] --check
+# remote 布局：upstream = https://github.com/putyy/res-downloader（其 push 地址已置为
+# 不可用域名，防止误推上游）；fork = https://github.com/chinakr/res-downloader-kylin
+#
+#   ./build/kylin/publish-fork.sh                 # 用已配好的 fork remote 预检并推送
+#   ./build/kylin/publish-fork.sh --check         # 只预检
+#   ./build/kylin/publish-fork.sh <仓库地址> [分支=master] [--check]   # 换/首次设定地址
 #
 # 凭据建议：HTTPS 用 fine-grained Personal Access Token，权限只给这一个仓库的
 # Contents: Read and write；不要用带 admin/repo 全量权限的经典 token，
@@ -12,15 +14,21 @@
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-URL="${1:-}"
-BRANCH="${2:-master}"
-CHECK_ONLY=0
-[ "${3:-}" = "--check" ] && CHECK_ONLY=1
-[ "$BRANCH" = "--check" ] && { BRANCH=master; CHECK_ONLY=1; }
 REMOTE=fork
-
-[ -n "$URL" ] || { echo "用法: $0 <fork 仓库地址> [分支=$BRANCH]"; exit 2; }
+URL=""; BRANCH=master; CHECK_ONLY=0
+for a in "$@"; do
+  case "$a" in
+    --check) CHECK_ONLY=1 ;;
+    *://*)    URL="$a" ;;
+    *)       BRANCH="$a" ;;
+  esac
+done
 cd "$SRC"
+if [ -z "$URL" ]; then
+  URL="$(git remote get-url "$REMOTE" 2>/dev/null || true)"
+  [ -n "$URL" ] || { echo "未指定仓库地址，且本机没有 $REMOTE remote"; exit 2; }
+  echo "使用已配置的 $REMOTE remote: $URL"
+fi
 command -v git >/dev/null || { echo "本机没有 git"; exit 1; }
 
 fail() { echo "✗ $*"; exit 1; }
@@ -31,7 +39,7 @@ echo "== 1. 安全与隐私预检"
 ok "工作区干净"
 
 if [ -e .git/shallow ]; then
-  echo "  提示：仓库仍是浅克隆，推上去会缺历史。先执行： git fetch --unshallow origin"
+  echo "  提示：仓库仍是浅克隆，推上去会缺历史。先执行： git fetch --unshallow upstream"
   exit 1
 fi
 ok "历史完整（$(git rev-list --count HEAD) 个提交）"
@@ -60,7 +68,7 @@ ok "无构建产物/私钥入库（deb 请发 GitHub Releases，不要提交进�
 
 # fork 声明与许可必须存在，且 LICENSE 未被改动
 [ -f FORK-NOTES.md ] || fail "缺 FORK-NOTES.md（fork 说明与改动清单）"
-git diff --quiet origin/master -- LICENSE || fail "LICENSE 被改动过，Apache-2.0 要求原样保留"
+git diff --quiet upstream/master -- LICENSE || fail "LICENSE 被改动过，Apache-2.0 要求原样保留"
 ok "FORK-NOTES.md 就位，LICENSE 未改动"
 
 case "$URL" in
@@ -68,8 +76,8 @@ case "$URL" in
 esac
 
 echo "== 2. 将要推送的提交（相对上游）"
-git log --oneline --format='  %h %an %s' origin/master..HEAD
-echo "  共 $(git rev-list --count origin/master..HEAD) 个"
+git log --oneline --format='  %h %an %s' upstream/master..HEAD
+echo "  共 $(git rev-list --count upstream/master..HEAD) 个"
 
 echo "== 3. 目标"
 echo "  remote: $REMOTE → $URL"

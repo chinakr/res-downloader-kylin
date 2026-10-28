@@ -14,10 +14,20 @@
 1. **官方 Linux arm64 产物在本机跑不起来。** 上游 CI 使用 Debian 12 基底的
    `golang:*-bookworm`（glibc 2.36）链接，产物要求 `GLIBC_2.34`；麒麟 V10 SP1 的
    底座是 Ubuntu 20.04（glibc 2.31），直接执行报 `GLIBC_2.34 not found`。
-2. **上游把 MITM 根证书连同私钥硬编码在源码里**（`core/app.go`，`CN=gowas.cn`，自签，
-   全球所有安装共用一把）。私钥随公开仓库分发，意味着任何读过该仓库的人都能对
-   信任了这把根的设备做中间人。
-3. 若干处桌面集成在麒麟上不工作（文件管理器、系统代理、启动项、Wayland 渲染）。
+2. **本分支所基于的 3.1.3 线上，MITM 根证书连同私钥硬编码在 `core/app.go`**
+   （`CN=gowas.cn`，自签，全球所有安装共用一把；私钥随公开仓库分发）。
+   这点必须连同上下文一起说清：**上游已经在 4.0 系列自行修复**——`internal/system/certificate.go`
+   改为每台机器生成 `mitm-ca.crt/mitm-ca.key`，并以常量 `legacyCertificateSHA1`
+   （值 `F0A43AE8E1884CE134A995271F5CD7B0BAF87080`，与 3.1.3 内嵌那把的 SHA-1 逐位相同）
+   自动从信任库清理旧根；`pass.cache` 也作为遗留文件被移除。
+   之所以仍然值得单独做一个 3.1.3 分支：**GitHub 上的 latest release 至今仍是 3.1.3**
+   （发布于 2025-12-30，含 `res-downloader_3.1.3_linux_arm64` 与 `.deb`），
+   4.0 只以 prerelease 形式推进到 `4.0.0-beta.7`（2026-10-21），
+   也就是说新用户在默认下载路径上拿到的仍是内嵌该私钥的构建。
+   因此本分支的 CA 改造定位为**3.1.3 线的过渡方案**，待 4.0 正式发布后将废弃、改用上游实现
+   （详见下一节）。
+3. 若干处桌面集成在麒麟上不工作（文件管理器、系统代理、启动项、Wayland 渲染），
+   且上游 4.0 里这几处仍未处理。
 
 ## 本分支改了什么（Apache-2.0 §4(b) 要求的变更说明）
 
@@ -35,6 +45,36 @@
 | `build/linux/Debian/DEBIAN/.control` 等上游打包模板 | 未修改（本分支的打包走 `build/kylin/package-deb.sh`） | — |
 
 **上游代码的其余部分保持原样。** 本分支只做适配与安全改造，没有新增功能。
+
+## 与上游 4.0 的关系（决定要不要用本分支前请看）
+
+上游正在推进 4.0（目录结构已重构为 `internal/`、`cmd/`、`plugins/`，并补了测试）。
+对照下来，本分支的改动分成两类：
+
+**已被上游 4.0 覆盖，等 4.0 正式版后本分支会直接改用上游实现、删掉自己的版本：**
+
+* 机器专属 CA 与私钥只落本机（上游 `internal/system/certificate.go`，实现得比本分支更完整：
+  带 `certificate_test.go`、`validateCertificateAuthority`、`randomSubjectKeyID`）
+* 从信任库自动清理旧共用根（上游有 `legacyCertificateSHA1` + `removeLegacyCertificate`，
+  本分支只能提供一个手工检查脚本 `build/kylin/migrate-off-shared-ca.sh`）
+* 不再用固定密钥缓存 sudo 密码（上游把 `pass.cache` 整体当遗留文件清掉）
+* 证书状态的检测与安装引导（上游新增 `CurrentCertificateStatus`、`CertificateSetupGuide.vue`）
+
+**上游 4.0 里仍然没有、是本分支继续存在的理由：**
+
+* 让 arm64 产物能在 glibc 2.31 的麒麟上原生运行的整套构建链
+  （`build/kylin/` 的 focal 基线容器、`-tags desktop,production`、`-buildvcs=false`、免 root 打 deb）
+* `WEBKIT_DISABLE_COMPOSITING_MODE=1` + `GDK_BACKEND=x11` 的启动包装（UKUI 的 Wayland +
+  XWayland 会话上不加就白屏）
+* `WM_CLASS` 与 `StartupWMClass` 对齐（可执行名不能带后缀，否则面板认不出窗口）
+* 文件管理器探测加入 `peony`
+* 接管桌面代理前备份、取消接管时还原（4.0 的 `platform_linux.go` 仍是直接 unset）
+* 用户级 NSS 信任库安装（免 root；4.0 的 Linux 侧没有这条，只有 Windows 用了 `certutil.exe`）
+* 目标机部署文档与容器内端到端验证
+
+结论：**如果你用的是上游 4.0-beta 或更新的版本，不需要本分支的 CA 部分**；
+本分支当前的价值集中在"让 3.1.3 在麒麟上原生跑起来"。等 4.0 正式版发布，本分支会 rebase
+过去并只保留上面第二类改动。
 
 ## 安全性说明（用之前请读）
 
@@ -75,6 +115,14 @@ deb 文件名            res-downloader_3.1.3-kylin3+build90-4722bb9_arm64.deb
 
 ## 与上游的关系维护
 
-本分支不自动跟进上游更新。同步上游的做法：把上游加为 `upstream` remote，
-`git fetch upstream && git rebase upstream/master`（本地提交数很少，rebase 冲突面小），
+本分支不自动跟进上游更新。仓库的 remote 已经配好：
+
+```
+upstream  https://github.com/putyy/res-downloader        # 只读；push 地址已指向一个不可用域名，防止误推上游
+fork      https://github.com/chinakr/res-downloader-kylin # 默认推送目标（branch.master.remote = fork）
+```
+
+跟进上游：`git fetch upstream --tags && git rebase upstream/master`（本地提交数很少，冲突面小），
 然后在容器里重跑 `build/kylin/build.sh` 与 `build/kylin/package-deb.sh --test-install` 验证。
+注意上游 4.0 的开发在 `dev` 分支上（`4.0.0-beta.*` 标签所在），真要跟进 4.0 时是
+`git rebase upstream/dev` 或等它并回 `master`，届时按上一节的分类取舍改动。

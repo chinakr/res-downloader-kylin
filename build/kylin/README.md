@@ -142,16 +142,24 @@ UKUI 面板靠 `WM_CLASS` 与桌面项对应，对不上就认不出运行中的
 `/usr/lib/git-core`，不指过去就找不到 `git-remote-https` 等辅助程序）。没有本机 git 时
 `git.sh` 仍可用容器代跑。
 
-发布流程（细节与安全预检见 `publish-fork.sh` 顶部注释）：
+发布流程（当前状态：目录已改名、remote 已配好、历史已补全，只差带凭据推送）：
 
-1. 先在 GitHub 上游页面点 **Fork**（GitHub 不能把已有仓库事后转成 fork，且 fork 自带完整历史）
-2. `git fetch --unshallow origin`（本仓库最初是浅克隆，不补全推上去会缺历史）
-3. `./build/kylin/publish-fork.sh https://github.com/<你的用户名>/<仓库名>.git`
-   —— 它会检查工作区干净、历史完整、跟踪文件与提交元数据里没有本机用户名/主机名、
-   没有把 `dist/`、`bin/`、私钥类文件入库、`LICENSE` 未被改动、`FORK-NOTES.md` 存在，
-   然后列出待推提交并要求显式确认
-4. 凭据用 fine-grained PAT（只给该仓库 Contents 写权限），**不要**写进 remote URL
-5. 二进制走 Releases 并附 `sha256sum`，不要提交进仓库
+1. 目录与仓库名对齐为 `res-downloader-kylin`。**只改目录名**：包名、可执行名、`AppName`、
+   `~/.config/res-downloader`、`StartupWMClass` 全部保持与上游一致——`WM_CLASS` 取自可执行
+   文件名（任务栏关联刚修过），配置路径取自 `AppName`，dpkg 靠包名记账。
+   fork 的身份只由目录名/仓库名承载，这样跟进上游时零改动
+2. remote 布局：`upstream` = putyy/res-downloader（push 地址指向不可用域名，防误推上游）、
+   `fork` = chinakr/res-downloader-kylin，且 `branch.master.remote=fork`，
+   裸 `git push` 只会推到 fork
+3. 浅克隆已补全：`git fetch --unshallow upstream && git fetch --tags upstream`
+   （顺带发现上游已有 `4.0.0-beta.*`，取舍见根目录 `FORK-NOTES.md`）
+4. `./build/kylin/publish-fork.sh --check` 跑全部预检：工作区干净、历史完整、
+   跟踪文件与提交元数据里没有本机用户名/主机名（匹配串运行时从 `id -un`/`hostname` 取，
+   不把本机身份写进脚本）、没有 `dist/`/`bin/`/私钥类文件入库、`LICENSE` 未改动、
+   `FORK-NOTES.md` 存在，并匿名探测 fork 的分支能否快进推送
+5. 去掉 `--check` 即推送；凭据用只授 `Contents: Read and write` 的 fine-grained PAT，
+   **不要**写进 remote URL 或 `.git/config`
+6. 二进制走 Releases 并附 `sha256sum`，不要提交进仓库
 
 ## 已完成的验证
 
