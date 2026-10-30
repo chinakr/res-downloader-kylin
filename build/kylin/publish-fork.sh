@@ -15,7 +15,7 @@ set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 REMOTE=fork
-URL=""; BRANCH=master; CHECK_ONLY=0
+URL=""; BRANCH=""; CHECK_ONLY=0
 for a in "$@"; do
   case "$a" in
     --check) CHECK_ONLY=1 ;;
@@ -24,6 +24,14 @@ for a in "$@"; do
   esac
 done
 cd "$SRC"
+# 默认推当前分支：v4 线是 kylin-v4，不该去改写 fork 上那条对应 3.x 的 master
+BRANCH="${BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
+# “待推提交”的基线：v4 线跟着 upstream/release/v4.0，3.x 线跟着 upstream/master
+BASE=""
+for ref in upstream/release/v4.0 upstream/master; do
+  if git rev-parse --verify -q "$ref" >/dev/null; then BASE="$ref"; break; fi
+done
+[ -n "$BASE" ] || BASE="$(git merge-base HEAD "$REMOTE/$BRANCH" 2>/dev/null || echo HEAD)"
 if [ -z "$URL" ]; then
   URL="$(git remote get-url "$REMOTE" 2>/dev/null || true)"
   [ -n "$URL" ] || { echo "未指定仓库地址，且本机没有 $REMOTE remote"; exit 2; }
@@ -68,7 +76,7 @@ ok "无构建产物/私钥入库（deb 请发 GitHub Releases，不要提交进�
 
 # fork 声明与许可必须存在，且 LICENSE 未被改动
 [ -f FORK-NOTES.md ] || fail "缺 FORK-NOTES.md（fork 说明与改动清单）"
-git diff --quiet upstream/master -- LICENSE || fail "LICENSE 被改动过，Apache-2.0 要求原样保留"
+git diff --quiet "$BASE" -- LICENSE || fail "LICENSE 被改动过，Apache-2.0 要求原样保留"
 ok "FORK-NOTES.md 就位，LICENSE 未改动"
 
 case "$URL" in
@@ -76,8 +84,8 @@ case "$URL" in
 esac
 
 echo "== 2. 将要推送的提交（相对上游）"
-git log --oneline --format='  %h %an %s' upstream/master..HEAD
-echo "  共 $(git rev-list --count upstream/master..HEAD) 个"
+git log --oneline --format="  %h %an %s" $BASE..HEAD
+echo "  共 $(git rev-list --count $BASE..HEAD) 个"
 
 echo "== 3. 目标"
 echo "  remote: $REMOTE → $URL"
