@@ -200,3 +200,45 @@ Report the issue through [GitHub Issues](https://github.com/putyy/res-downloader
 - Unreadable artifact: confirm the download has finished and the file has not been moved, deleted or cleared.
 
 See [CLI and MCP](automation.md) for automation usage.
+
+## Exits immediately on Kylin / UOS (UKUI + Wayland) {#kylin-ukui-wayland}
+
+Symptom: a tiny error window appears, or the app quits by itself after a blank window;
+the log contains `frontend did not prepare a startup view before the startup deadline`.
+
+Cause: UKUI runs a Wayland session with XWayland, and the hardware compositing path of
+WebKitGTK 2.38 crashes `WebKitWebProcess` on this GPU stack. The app has a startup
+watchdog, so it shuts down when no view is ready in time.
+
+Fix: start it through the wrapper that exports the required variables (already shipped
+in the `.deb`):
+
+```bash
+export WEBKIT_DISABLE_COMPOSITING_MODE=1
+export GDK_BACKEND=x11
+```
+
+Set them manually when running a raw binary or the AppImage.
+
+## Official arm64 build fails with `GLIBC_2.34 not found` {#kylin-glibc-baseline}
+
+Kylin V10 SP1 is based on Ubuntu 20.04 (glibc 2.31). Artifacts linked on a newer
+baseline (e.g. Debian 12 bookworm, glibc 2.36) require `GLIBC_2.34` and cannot run:
+
+```text
+/lib/aarch64-linux-gnu/libc.so.6: version `GLIBC_2.34' not found (required by /usr/local/bin/res-downloader)
+```
+
+For cgo binaries the glibc floor is set by the **build machine's libc**, not by the Go
+version. Either build inside an old-baseline container (`ubuntu:20.04` plus matching
+Go/Node and `libwebkit2gtk-4.0-dev`, which lowers the floor to `GLIBC_2.17` - see
+`build/linux/dockerfile.focal`), or state the minimum glibc per artifact in the release
+notes so users do not discover it after installing.
+
+## Capturing HTTPS without an administrator password {#kylin-nss-without-root}
+
+Trusting the device CA in the system store needs admin authorization. Without it, the
+certificate can still be trusted for the current user (requires `certutil` from
+`libnss3-tools` / `nss-tools`), which is enough for Chromium-based browsers. Firefox
+reads neither store and still needs a manual certificate import.
+Restart the browser after installing or rotating the certificate: trust chains are cached.

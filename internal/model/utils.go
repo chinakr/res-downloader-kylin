@@ -135,6 +135,8 @@ func GetUniqueFileName(filePath string) string {
 
 func OpenFolder(filePath string) error {
 	var cmd *exec.Cmd
+	var commands [][]string
+	var lastErr error
 
 	switch sysRuntime.GOOS {
 	case "darwin":
@@ -142,23 +144,45 @@ func OpenFolder(filePath string) error {
 	case "windows":
 		cmd = exec.Command("explorer", "/select,", filePath)
 	case "linux":
-		cmd = exec.Command("nautilus", filePath)
-		if err := cmd.Start(); err != nil {
-			cmd = exec.Command("thunar", filePath)
-			if err := cmd.Start(); err != nil {
-				cmd = exec.Command("dolphin", filePath)
-				if err := cmd.Start(); err != nil {
-					cmd = exec.Command("pcmanfm", filePath)
-					if err := cmd.Start(); err != nil {
-						return err
-					}
-				}
-			}
+		// KYLIN-FORK(begin) 打开文件所在位置：原先只试 nautilus/thunar/dolphin/pcmanfm，
+		// 银河麒麟与 UOS 的 UKUI 桌面只有 peony，Deepin 用 deepin-file-manager/caja，
+		// 结果这四个在这类机器上一个都找不到，"打开保存位置"必然失败。
+		// 这里改成与同文件 OpenDirectory 一致的风格：按 PATH 实际存在的顺序尝试，
+		// 最后兜底 xdg-open。顺带修掉原实现在最外层 return cmd.Start() 处
+		// 把已经 Start 成功的命令再启动一次的问题。
+		commands = [][]string{
+			{"peony", filePath},
+			{"peony-qt", filePath},
+			{"nautilus", filePath},
+			{"thunar", filePath},
+			{"dolphin", filePath},
+			{"pcmanfm", filePath},
+			{"caja", filePath},
+			{"xdg-open", filePath},
 		}
+		for _, command := range commands {
+			if _, lookErr := exec.LookPath(command[0]); lookErr != nil {
+				lastErr = lookErr
+				continue
+			}
+			if err := exec.Command(command[0], command[1:]...).Start(); err != nil {
+				lastErr = err
+				continue
+			}
+			return nil
+		}
+		if lastErr != nil {
+			return lastErr
+		}
+		return errors.New("no file manager or xdg-open found on this system")
+		// KYLIN-FORK(end)
 	default:
 		return errors.New("unsupported platform")
 	}
 
+	if cmd == nil { // 只在 darwin/windows 分支里被赋值；防御性判断，避免空指针
+		return errors.New("no command prepared for this platform")
+	}
 	return cmd.Start()
 }
 

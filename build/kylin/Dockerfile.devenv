@@ -1,0 +1,35 @@
+# 麒麟 V10 SP1 (arm64) 原生构建环境
+# 关键点：Kylin V10 SP1 底座 = Ubuntu 20.04，glibc 2.31。
+# 官方 release 二进制在 Ubuntu 22.04(glibc 2.35) 工具链上链接，产物要求 GLIBC_2.34，
+# 在本机无法原生运行。改在 focal(glibc 2.31) 里用 cgo 链接 crt1.o，
+# 产物 glibc 门槛 <= 2.31，即可在麒麟上原生执行（运行期不需要 Docker）。
+FROM ubuntu:20.04
+
+ARG GO_VERSION=1.23.2
+ARG NODE_VERSION=v18.20.4
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    GOPROXY=https://goproxy.cn,direct \
+    CGO_ENABLED=1 \
+    PATH=/usr/local/go/bin:/usr/local/node/bin:$PATH
+
+RUN sed -i 's|http://ports.ubuntu.com/ubuntu-ports|http://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports|g' /etc/apt/sources.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates curl xz-utils git \
+      build-essential pkg-config \
+      libgtk-3-dev libwebkit2gtk-4.0-dev libsoup2.4-dev libglib2.0-dev \
+      libjpeg-turbo8-dev libpng-dev libffi-dev patch \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL "https://golang.google.cn/dl/go${GO_VERSION}.linux-arm64.tar.gz" -o /tmp/go.tgz \
+ && tar -C /usr/local -xzf /tmp/go.tgz && rm -f /tmp/go.tgz \
+ && go version
+
+RUN curl -fsSL "https://registry.npmmirror.com/-/binary/node/${NODE_VERSION}/node-${NODE_VERSION}-linux-arm64.tar.gz" -o /tmp/node.tgz \
+ && mkdir -p /usr/local/node && tar -C /usr/local/node --strip-components=1 -xzf /tmp/node.tgz && rm -f /tmp/node.tgz \
+ && npm config set registry https://registry.npmmirror.com -g \
+ && node -v && npm -v
+
+WORKDIR /src
+CMD ["bash"]

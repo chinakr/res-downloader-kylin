@@ -90,9 +90,32 @@ func (s *Setup) isCertificateInstalled(fingerprint string) (bool, error) {
 		"/usr/share/ca-certificates/trust-source/res-downloader.crt",
 		"/usr/share/ca-certificates/res-downloader/res-downloader.crt",
 	}
+	if matched, err := dropInCertificateMatchesAny(paths, fingerprint); err != nil || matched {
+		return matched, err
+	}
+	// KYLIN-FORK(begin) 再看两个免 root 就能确认的位置：合并 bundle（curl/Go/Node 与
+	// 部分浏览器实际读取的信任链）和当前用户的 NSS 库（Chromium 系读取）。
+	certificate, readErr := os.ReadFile(s.CertFile)
+	if readErr == nil {
+		if trusted, err := certificateTrustedInSystemBundle(certificate); err == nil && trusted {
+			return true, nil
+		}
+		if trusted, err := certificateTrustedInNSS(certificate); err == nil && trusted {
+			return true, nil
+		}
+	}
+	// KYLIN-FORK(end)
+	return false, nil
+}
+
+// dropInCertificateMatchesAny 在若干"投放文件"位置里查找指定指纹。
+// 只有确实不存在才继续往下找；读不到（root 750/640 的投放文件很常见）或格式异常
+// 都不应该让整个证书状态检查失败——上游原先会把 permission denied 一路抛到界面上，
+// 弹出 "verify installed certificate: ... permission denied"。
+func dropInCertificateMatchesAny(paths []string, fingerprint string) (bool, error) {
 	for _, path := range paths {
 		matches, err := certificateFileMatchesSHA1(path, fingerprint)
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) { // KYLIN-FORK: 容忍读不到
 			continue
 		}
 		if err != nil {
@@ -231,11 +254,29 @@ func (s *Setup) installCert() (string, error) {
 		certPath = "/usr/local/share/ca-certificates/" + certName
 	}
 
+	// KYLIN-FORK(begin) 系统信任库这条走不通时（没有 root，或不愿把登录密码交给界面输入框），
+	// 退到当前用户的 NSS 库：Chromium/Chrome 系浏览器读它，抓 HTTPS 立刻可用。
+	// 系统 bundle 那半边仍然缺失，所以把实际情况如实写进返回值供界面提示，
+	// 而不是假装成功。
+	systemOutput, systemErr := s.installCertInSystemTrust(certPath, certName, updateCmd)
+	if systemErr == nil {
+		return "", nil
+	}
+	nssErr := s.installUserTrust()
+	if nssErr != nil {
+		return systemOutput, fmt.Errorf("%w；写入当前用户信任库也失败了: %v", systemErr, nssErr)
+	}
+	return fmt.Sprintf("系统信任库需要管理员授权（%v）；已改为信任到当前用户，"+
+		"Chromium/Chrome 系浏览器可以抓取 HTTPS，Firefox 仍需手动导入证书。", systemErr), nil
+	// KYLIN-FORK(end)
+}
+
+// installCertInSystemTrust 上游原有的系统信任库安装流程，抽出来便于在失败时降级。
+func (s *Setup) installCertInSystemTrust(certPath, certName string, updateCmd []string) (string, error) {
 	if output, err := s.runCommand([]string{"cp", "-f", s.CertFile, certPath}, true); err != nil {
 		return string(output), fmt.Errorf("copy certificate: %w", err)
 	}
-
-	if distro == "deepin" {
+	if distro, _ := s.getLinuxDistro(); distro == "deepin" {
 		confPath := "/etc/ca-certificates.conf"
 		confEntry := s.app.AppName + "/" + certName
 		checkCmd := []string{"grep", "-qxF", confEntry, confPath}
@@ -246,7 +287,6 @@ func (s *Setup) installCert() (string, error) {
 			}
 		}
 	}
-
 	if output, err := s.runCommand(updateCmd, true); err != nil {
 		return string(output), fmt.Errorf("update system certificate trust: %w", err)
 	}

@@ -236,3 +236,42 @@ tail -n 200 "${XDG_CONFIG_HOME:-$HOME/.config}/res-downloader/logs/app.log"
 - 产物不可读：确认下载已完成，文件未被移动、删除或清理。
 
 自动化使用方法见 [CLI 与 MCP](automation.md)。
+
+## 银河麒麟 / UOS（UKUI + Wayland）启动后立刻退出 {#kylin-ukui-wayland}
+
+现象：启动后弹出一个很小的错误窗口，或界面空白后应用自行退出，日志里类似
+`frontend did not prepare a startup view before the startup deadline`。
+
+原因：UKUI 桌面跑在 Wayland 会话 + XWayland 上，WebKitGTK 2.38 的硬件合成路径在这条
+GPU 通路上会让 `WebKitWebProcess` 启动即崩；应用带启动看门狗，前端在时限内没出画面就主动退出。
+
+处理：用带环境变量的方式启动（`.deb` 的启动包装已内置）：
+
+```bash
+export WEBKIT_DISABLE_COMPOSITING_MODE=1
+export GDK_BACKEND=x11
+```
+
+直接运行 AppImage 或未包装的二进制时，请先设置这两个变量。
+
+## 官方 arm64 产物报 `GLIBC_2.34 not found` {#kylin-glibc-baseline}
+
+银河麒麟 V10 SP1 的底座是 Ubuntu 20.04（glibc 2.31）。若构建机基线更年轻（如
+Debian 12 bookworm，glibc 2.36），产出的二进制会要求 `GLIBC_2.34`，在这类系统上直接失败：
+
+```text
+/lib/aarch64-linux-gnu/libc.so.6: version `GLIBC_2.34' not found (required by /usr/local/bin/res-downloader)
+```
+
+cgo 程序的 glibc 门槛由**构建机的 libc** 决定，与 Go 版本无关。两种做法：
+
+- 在老基线容器里编译，例如 `ubuntu:20.04` + 相应 Go/Node + `libwebkit2gtk-4.0-dev`，
+  产物门槛可降到 `GLIBC_2.17`；本仓库提供 `build/linux/dockerfile.focal`。
+- 或在 Release 说明里标注各产物的最低 glibc / 发行版要求，别让用户装完才发现。
+
+## 没有管理员密码时想抓 HTTPS {#kylin-nss-without-root}
+
+写入系统信任库需要管理员授权。拿不到授权时可以只把本机设备证书信任到当前用户
+（需要发行版的 `libnss3-tools` / `nss-tools` 提供 `certutil`），Chromium、Chrome 系
+浏览器即可解密 HTTPS；Firefox 两处都不读，仍要在浏览器内手动导入证书。
+装完或换过证书后要重启浏览器，信任链有缓存。
