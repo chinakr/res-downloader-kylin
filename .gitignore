@@ -15,3 +15,7 @@ internal/plugin/bundled/*
 
 docs/.vitepress/cache/
 docs/.vitepress/dist/
+
+# KYLIN-FORK: 本地构建产物与打包输出不入库（deb 走 GitHub Releases）
+dist/
+bin/
