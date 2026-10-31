@@ -18,6 +18,11 @@ sudo dpkg -i res-downloader_4.0.0-kylin1+build<…>_arm64.deb
 UKUI 开始菜单项（`StartupWMClass` 已对齐）。**包不写系统信任库、不含任何证书**——
 证书由 v4 自己在首次需要时为本机生成，并在界面里请你授权。
 
+**微信/视频号插件已内嵌在包里**（来自 `putyy/resd-plugin-wechat`，Apache-2.0，
+含其 `LICENSE`、`main.js`、`plugin.json`、`decrypt.wasm`），装完不需要再去「插件管理」
+手工导入。构建脚本对这一步做了强制门禁：拉不到插件就直接失败，不会产出一个
+"能装但视频号抓不到"的包。
+
 ## 首次使用
 
 1. 从菜单或 `/usr/local/bin/res-downloader` 启动（**不要**直接跑

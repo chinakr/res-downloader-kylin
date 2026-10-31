@@ -64,15 +64,19 @@ v4 把微信/视频号解析移出了主仓库：`wails.json` 的 `plugins` 指�
 `https://github.com/putyy/resd-plugin-wechat`，`internal/plugin/bundled/` 与 `plugins/`
 都被 `.gitignore` 排除，`internal/plugin/bundled.go` 用 `//go:embed bundled` 内嵌，
 CI 是先 `download-artifact: bundled-plugins` 再构建。
-**没有这一步的自建产物就没有微信插件，视频号既解析不了也下载不了。** 本地构建前执行：
+**没有这一步的自建产物就没有微信插件**，实测症状是"视频号下载不了"，
+而且更糟：代理照旧接管微信域名却没有解析能力，用户侧表现为"一开抓取视频号播放不了"。
 
-```bash
-git clone https://github.com/putyy/resd-plugin-wechat.git plugins/resd-plugin-wechat
-go run main.go plugin lint ./plugins/resd-plugin-wechat
-go run main.go plugin pack   ./plugins/resd-plugin-wechat   # 生成 internal/plugin/bundled/official.wechat/
-```
+`build/kylin/build.sh` 已把这一步做成强制门禁（`RESD_PLUGINS=download|local|skip`，
+默认 `download` 自动 `git clone` 最新插件源码再 `go run ./cmd/bundleplugins`）：
+插件数不足直接失败退出，不再可能产出"没有插件的包"。负测试实测：临时移走
+`internal/plugin/bundled/resd-plugin-wechat` 并用 `local` 模式构建 →
+`✗ 插件内嵌失败：需要 1 个、实际 0 个，拒绝产出不含插件的包`（退出码 1）。
+内嵌成功的判据也验过：新产物 `strings` 命中 `official.wechat`/`resd-plugin-wechat`/
+`decrypt.wasm`，而修好前的包这三项都是 0。
 
-（用户也可以直接在应用「插件管理」里导入 release 的 `plugin.zip`，效果等价，只是不随包分发。）
+插件目录里带自己的 `LICENSE`（Apache-2.0），随 deb 一起分发，无需额外授权动作。
+用户也可以在应用「插件管理」里导入 release 的 `plugin.zip`，效果等价，只是不随包分发。
 
 ## 复现这些结论
 

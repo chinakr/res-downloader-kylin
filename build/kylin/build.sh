@@ -83,8 +83,36 @@ printf '%s\n' "$STAMP" > "$OUT/.buildstamp"
 printf '%s\n' "$PKG_VER" > "$OUT/.package-version"
 echo "  包版本: $PKG_VER"
 # -buildvcs=false：挂载进来的 .git 属主与容器内 root 不一致，git 会拒绝读仓库。
+# v4 把微信/视频号解析拆成了独立插件仓库（wails.json 的 plugins → putyy/resd-plugin-wechat），
+# internal/plugin/bundled/ 被 .gitignore 排除、靠 //go:embed 进二进制。
+# 少这一步就会产出一个「能装能跑、但视频号既解析不了也下不了」的包（我们踩过），
+# 所以这里做成强制门禁：默认自动拉取插件，拉不到就直接失败，不出半成品包。
+#   RESD_PLUGINS=download  默认，git clone 最新插件源码后内嵌
+#   RESD_PLUGINS=local     用已经 clone 到 plugins/ 下的源码（离线/开发时）
+#   RESD_PLUGINS=skip      明确跳过（只用于验证前端样式等，产物会带警告）
+PLUGINS_MODE="${RESD_PLUGINS:-download}"
+echo "  插件内嵌模式: $PLUGINS_MODE"
+
 "${RUN[@]}" bash -ec "
   go mod download
+  # 计数一律用 wc -l：grep -c 在命中 0 时返回退出码 1，会被 bash -e 当场掐死
+  NEED=\$(grep -o '\"id\":' wails.json | wc -l)
+  HAVE=\$(ls -1 internal/plugin/bundled 2>/dev/null | grep -v '^README.md\$' | wc -l)
+  if [ '$PLUGINS_MODE' = skip ]; then
+    echo \"  ⚠ 已跳过插件内嵌（当前有 \$HAVE/\$NEED 个），此产物不能用于抓微信/视频号\"
+  elif [ \"\$HAVE\" -lt \"\$NEED\" ]; then
+    ARG=--download; [ '$PLUGINS_MODE' = local ] && ARG=
+    for try in 1 2 3; do
+      go run ./cmd/bundleplugins \$ARG && break
+      echo \"  插件准备第 \$try 次失败（github 主站间歇性超时很常见），3 秒后重试\"; sleep 3
+    done
+    HAVE=\$(ls -1 internal/plugin/bundled 2>/dev/null | grep -v '^README.md\$' | wc -l)
+  fi
+  if [ '$PLUGINS_MODE' != skip ] && [ \"\$HAVE\" -lt \"\$NEED\" ]; then
+    echo \"✗ 插件内嵌失败：需要 \$NEED 个、实际 \$HAVE 个，拒绝产出不含插件的包\"
+    exit 1
+  fi
+  ls -1 internal/plugin/bundled | grep -v '^README.md\$' | sed 's/^/  已内嵌插件: /'
   go build -trimpath -buildvcs=false -tags '$GO_TAGS' -ldflags \"$GO_LDFLAGS -X res-downloader/internal/app.ReleaseVersion=$PKG_VER\" -o bin/res-downloader-linux-arm64 .
 "
 
