@@ -254,20 +254,29 @@ func (s *Setup) installCert() (string, error) {
 		certPath = "/usr/local/share/ca-certificates/" + certName
 	}
 
-	// KYLIN-FORK(begin) 系统信任库这条走不通时（没有 root，或不愿把登录密码交给界面输入框），
-	// 退到当前用户的 NSS 库：Chromium/Chrome 系浏览器读它，抓 HTTPS 立刻可用。
-	// 系统 bundle 那半边仍然缺失，所以把实际情况如实写进返回值供界面提示，
-	// 而不是假装成功。
+	// KYLIN-FORK(begin) 系统信任库与当前用户的 NSS 库**都要写**，不是二选一。
+	//
+	// 实测（银河麒麟 V10 SP1 + chromium-browser / 微信内置浏览器等同内核产品）：
+	// Chromium 只看 ~/.pki/nssdb，不读 /etc/ssl/certs/ca-certificates.crt；
+	// 而只写 NSS 又会让 curl/Go/Node 等读系统 bundle 的程序不信任。
+	// 上游 v4 只写系统信任库，结果是「一开抓取浏览器整段断网、什么都抓不到」，
+	// 报 net::ERR_CERT_AUTHORITY_INVALID —— 对照实验见 build/kylin/PATCHES.md。
+	// 拿不到 root 时仍然只写 NSS 并把情况如实反馈给界面，不假装成功。
 	systemOutput, systemErr := s.installCertInSystemTrust(certPath, certName, updateCmd)
-	if systemErr == nil {
-		return "", nil
-	}
 	nssErr := s.installUserTrust()
-	if nssErr != nil {
+	switch {
+	case systemErr == nil && nssErr == nil:
+		return "", nil
+	case systemErr == nil:
+		return fmt.Sprintf("系统信任库已装好，但写入当前用户信任库失败：%v。"+
+			"Chromium/Chrome 系浏览器可能仍提示证书不安全，可安装 nss-tools 后重试，"+
+			"或手动导入证书。", nssErr), nil
+	case nssErr == nil:
+		return fmt.Sprintf("系统信任库需要管理员授权（%v）；已改为信任到当前用户，"+
+			"Chromium/Chrome 系浏览器可以抓取 HTTPS，Firefox 仍需手动导入证书。", systemErr), nil
+	default:
 		return systemOutput, fmt.Errorf("%w；写入当前用户信任库也失败了: %v", systemErr, nssErr)
 	}
-	return fmt.Sprintf("系统信任库需要管理员授权（%v）；已改为信任到当前用户，"+
-		"Chromium/Chrome 系浏览器可以抓取 HTTPS，Firefox 仍需手动导入证书。", systemErr), nil
 	// KYLIN-FORK(end)
 }
 

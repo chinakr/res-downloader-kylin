@@ -242,3 +242,24 @@ certificate can still be trusted for the current user (requires `certutil` from
 `libnss3-tools` / `nss-tools`), which is enough for Chromium-based browsers. Firefox
 reads neither store and still needs a manual certificate import.
 Restart the browser after installing or rotating the certificate: trust chains are cached.
+
+## Chromium reports `ERR_CERT_AUTHORITY_INVALID` (browsing dies once capture is on) {#chromium-nss-only}
+
+On some desktops the **Chromium family reads only the current user's `~/.pki/nssdb`, not the
+merged system bundle**. Measured on Kylin V10 SP1 with UKUI: the device root was already present
+in `/etc/ssl/certs/ca-certificates.crt` and `curl` through the proxy worked, yet headless
+Chromium loading `https://www.baidu.com/` returned `net::ERR_CERT_AUTHORITY_INVALID`
+(129,382-byte error DOM; after importing the same root into `~/.pki/nssdb` the same request
+returned 793,847 bytes versus a 793,884-byte no-proxy baseline). To users this looks like
+"turning capture on kills the network and nothing is captured".
+
+Fix - also trust the device root for the current user (needs `libnss3-tools` / `nss-tools`),
+then restart the browser:
+
+```bash
+certutil -A -d sql:$HOME/.pki/nssdb -t "C,," -n res-downloader-device-ca \
+  -i ~/.config/res-downloader/mitm-ca.crt
+```
+
+Installers should write **both** the system store and the user NSS database; writing only the
+system store is effectively a no-op on such systems.

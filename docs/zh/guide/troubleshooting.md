@@ -275,3 +275,21 @@ cgo 程序的 glibc 门槛由**构建机的 libc** 决定，与 Go 版本无关�
 （需要发行版的 `libnss3-tools` / `nss-tools` 提供 `certutil`），Chromium、Chrome 系
 浏览器即可解密 HTTPS；Firefox 两处都不读，仍要在浏览器内手动导入证书。
 装完或换过证书后要重启浏览器，信任链有缓存。
+
+## Chromium / 微信内置浏览器报 `ERR_CERT_AUTHORITY_INVALID`（开抓取后整段断网） {#chromium-nss-only}
+
+部分桌面上 **Chromium 系内核只读当前用户的 `~/.pki/nssdb`，不读合并后的系统 bundle**：
+本机（银河麒麟 V10 SP1 + UKUI）实测，`/etc/ssl/certs/ca-certificates.crt` 里已有设备根、
+`curl` 走代理一切正常，但无头 Chromium 打开 `https://www.baidu.com/` 得到
+`net::ERR_CERT_AUTHORITY_INVALID`（DOM 被截成 129,382 字节的错误页；把同一把根导入
+`~/.pki/nssdb` 后同样请求得到 793,847 字节，与不走代理的 793,884 字节基线一致）。
+表现就是"一开抓取网络就断了、什么都抓不到"，微信视频号还会提示"检查是否配置了代理"。
+
+处理：把同一把设备根也信任到当前用户库（需要 `libnss3-tools` / `nss-tools`），然后重启浏览器：
+
+```bash
+certutil -A -d sql:$HOME/.pki/nssdb -t "C,," -n res-downloader-device-ca \
+  -i ~/.config/res-downloader/mitm-ca.crt
+```
+
+建议安装流程把系统信任库与当前用户 NSS 库**都写**：只写系统库在上述环境里等于没装。
