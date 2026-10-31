@@ -120,6 +120,17 @@ else
   echo "  需要凭据时先设置好再跑，或直接在终端里 push。"
 fi
 
+# 新建分支时若会带出 .github/workflows/* 文件，GitHub 会要求 token 具备 Workflows
+# 权限，否则整个推送被 remote rejected（错误信息只提 pages.yml，容易误判成我们改了 CI）。
+if ! git ls-remote --exit-code --heads "$REMOTE" "$BRANCH" >/dev/null 2>&1; then
+  WF_COUNT=$(git ls-tree -r --name-only HEAD -- .github/workflows 2>/dev/null | wc -l)
+  if [ "$WF_COUNT" -gt 0 ]; then
+    echo "  ⓘ 这是新建分支，会带出 $WF_COUNT 个 .github/workflows 文件。"
+    echo "    GitHub 要求 token 勾选 Workflows 权限，否则会 remote rejected；"
+    echo "    这些文件来自上游分支本身，不是本 fork 的改动。"
+  fi
+fi
+
 if [ "$CHECK_ONLY" = 1 ]; then
   echo
   echo "预检通过（--check 模式，不推送）。准备好凭据后去掉 --check 即可推送。"
